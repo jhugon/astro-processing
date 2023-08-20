@@ -3,8 +3,10 @@
 from pathlib import Path
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
+from astropy.visualization import simple_norm
 import astroalign as aa
 from ccdproc import Combiner, CCDData
+from photutils.background import Background2D
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -55,7 +57,27 @@ for target in parentdir.iterdir():
     combiner = Combiner(aligned_images)
     combiner.sigma_clipping(func="median",dev_func="mad_std")
     avg_img = combiner.average_combine()
+    mean, median, std = sigma_clipped_stats(avg_img,sigma=3.0)
+    print(f"{std:.1f} ADU for combined image")
     avg_fn = f"avg_{target.name}.fit"
     print(f"Saving as {avg_fn}")
     avg_img.write(avg_fn,overwrite=True)
+
+    print("Estimating background...")
+    bkg = Background2D(avg_img,(50,50))
+    print(f"Median background: {bkg.background_median:.1f} ADU median RMS: {bkg.background_rms_median} ADU")
+    bkg_sub_img = avg_img - bkg.background
+    bkg_sub_img = CCDData(bkg_sub_img.value,unit=bkg_sub_img.unit,uncertainty=bkg.background_rms)
+    mean, median, std = sigma_clipped_stats(bkg_sub_img,sigma=3.0)
+    print(f"{std:.1f} ADU for background subtracted image")
+    bkg_sub_fn = f"bkg_sub_{target.name}.fit"
+    print(f"Saving as {bkg_sub_fn}")
+    bkg_sub_img.write(bkg_sub_fn,overwrite=True)
+
+    #fig, ax = plt.subplots()
+    #ax.imshow(bkg.background,origin='lower',norm=simple_norm(bkg.background,"log"))
+    #fig.savefig(f"bkg_{target.name}.png")
+
+    
+    
     break
