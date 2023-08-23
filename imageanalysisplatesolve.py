@@ -9,6 +9,7 @@ from astropy.stats import sigma_clipped_stats
 from ccdproc import CCDData
 from photutils.background import Background2D
 from photutils.detection import find_peaks
+from shutil import copyfile
 
 def findfilesindir(p):
     if p.is_file():
@@ -33,7 +34,7 @@ def runastrometrydotnet(fn,exedir):
     subprocess.run(command,cwd=exedir,check=True)
     return fn.with_suffix(".new")
 
-def analyze(fn):
+def analyze(fn,outdir):
     print(f"Analyzing {fn} ...")
     with TemporaryDirectory() as tempdir:
         tmpfn = fn
@@ -53,8 +54,8 @@ def analyze(fn):
             print(f"Mean Background:   {mean:.1f} ADU")
             print(f"Median Background: {median:.1f} ADU")
             print(f"Noise:             {std:.1f} ADU")
-        #except OSError as e:
-        #    print(f"OSError: {e} raised while opening file, skipping.")
+        outfile = ( outdir / tmpfn.stem ).with_suffix( ".fit")
+        copyfile(adnfn,outfile)
 
 def main():
     import argparse
@@ -84,7 +85,7 @@ def main():
     for indir in indirs:
         infiles += findfilesindir(indir)
     for infile in infiles:
-        analyze(infile)
+        analyze(infile,outdir)
     
         
 
