@@ -2,9 +2,11 @@
 
 from pathlib import Path
 
+from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from ccdproc import CCDData
 from photutils.background import Background2D
+from photutils.detection import find_peaks
 
 def findfilesindir(p):
     if p.is_file():
@@ -22,6 +24,18 @@ def findfilesindir(p):
         return result
     else:
         raise Exception(f"{p} isn't a file or directory")
+
+def analyze(fn):
+    print(f"Analyzing {fn} ...")
+    try:
+        hdu = fits.open(fn)[0]
+    except OSError as e:
+        print(f"OSError: {e} raised while opening file, skipping.")
+    else:
+        mean, median, std = sigma_clipped_stats(hdu.data,sigma=3.0)
+        print(f"Mean Background:   {mean:.1f} ADU")
+        print(f"Median Background: {median:.1f} ADU")
+        print(f"Noise:             {std:.1f} ADU")
 
 def main():
     import argparse
@@ -42,7 +56,6 @@ def main():
             raise Exception(f"{indir} doesn't exist")
         if not indir.is_dir():
             raise Exception(f"{indir} isn't a directory")
-        print(indir)
     if not outdir.exists():
         outdir.mkdir(parents=True)
     if not outdir.is_dir():
@@ -52,7 +65,7 @@ def main():
     for indir in indirs:
         infiles += findfilesindir(indir)
     for infile in infiles:
-        print(infile)
+        analyze(infile)
     
         
 
