@@ -30,7 +30,7 @@ def findfilesindir(p):
 
 def runastrometrydotnet(fn,exedir):
     print("Running astrometry.net ...")
-    command = ["solve-field",fn]
+    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--scale-high","5","--no-plots",fn]
     subprocess.run(command,cwd=exedir,check=True)
     return fn.with_suffix(".new")
 
@@ -54,6 +54,9 @@ def analyze(fn,outdir):
             print(f"Mean Background:   {mean:.1f} ADU")
             print(f"Median Background: {median:.1f} ADU")
             print(f"Noise:             {std:.1f} ADU")
+            hdu.header["BKMEAN"] = mean
+            hdu.header["BKMEDIAN"] = median
+            hdu.header["BKSTD"] = median
         outfile = ( outdir / tmpfn.stem ).with_suffix( ".fit")
         copyfile(adnfn,outfile)
 
