@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
+import subprocess
 
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
@@ -25,17 +27,34 @@ def findfilesindir(p):
     else:
         raise Exception(f"{p} isn't a file or directory")
 
+def runastrometrydotnet(fn,exedir):
+    print("Running astrometry.net ...")
+    command = ["solve-field",fn]
+    subprocess.run(command,cwd=exedir,check=True)
+    return fn.with_suffix(".new")
+
 def analyze(fn):
     print(f"Analyzing {fn} ...")
-    try:
-        hdu = fits.open(fn)[0]
-    except OSError as e:
-        print(f"OSError: {e} raised while opening file, skipping.")
-    else:
-        mean, median, std = sigma_clipped_stats(hdu.data,sigma=3.0)
-        print(f"Mean Background:   {mean:.1f} ADU")
-        print(f"Median Background: {median:.1f} ADU")
-        print(f"Noise:             {std:.1f} ADU")
+    with TemporaryDirectory() as tempdir:
+        tmpfn = fn
+        if fn.suffix == ".zip":
+            try:
+                subprocess.run(["unzip",str(fn)],cwd=tempdir,check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Error while running unzip: {e}, skipping file.")
+                return
+            else:
+                tmpfn = Path(tempdir) / Path(fn.stem)
+        adnfn = runastrometrydotnet(tmpfn,tempdir)
+        with fits.open(adnfn,mode="update") as hdul:
+            hdu = hdul[0]
+            print("Analyzing background ...")
+            mean, median, std = sigma_clipped_stats(hdu.data,sigma=3.0)
+            print(f"Mean Background:   {mean:.1f} ADU")
+            print(f"Median Background: {median:.1f} ADU")
+            print(f"Noise:             {std:.1f} ADU")
+        #except OSError as e:
+        #    print(f"OSError: {e} raised while opening file, skipping.")
 
 def main():
     import argparse
