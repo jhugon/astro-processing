@@ -11,6 +11,7 @@ from photutils.background import Background2D
 from photutils.detection import find_peaks
 from shutil import copyfile
 
+
 def findfilesindir(p):
     if p.is_file():
         if p.suffix == ".fit":
@@ -28,11 +29,13 @@ def findfilesindir(p):
     else:
         raise Exception(f"{p} isn't a file or directory")
 
+
 def runastrometrydotnet(fn,exedir):
     print("Running astrometry.net ...")
-    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--scale-high","5","--no-plots",fn]
+    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.25","--scale-high","10","--no-plots",fn]
     subprocess.run(command,cwd=exedir,check=True)
     return fn.with_suffix(".new")
+
 
 def analyze(fn,outdir):
     print(f"Analyzing {fn} ...")
@@ -46,7 +49,11 @@ def analyze(fn,outdir):
                 return
             else:
                 tmpfn = Path(tempdir) / Path(fn.stem)
-        adnfn = runastrometrydotnet(tmpfn,tempdir)
+        try:
+            adnfn = runastrometrydotnet(tmpfn,tempdir)
+        except Exception as e:
+            print("Error: {e}, skipping file.")
+            return
         with fits.open(adnfn,mode="update") as hdul:
             hdu = hdul[0]
             print("Analyzing background ...")
@@ -59,6 +66,7 @@ def analyze(fn,outdir):
             hdu.header["BKSTD"] = median
         outfile = ( outdir / tmpfn.stem ).with_suffix( ".fit")
         copyfile(adnfn,outfile)
+
 
 def main():
     import argparse
