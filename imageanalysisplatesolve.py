@@ -3,13 +3,19 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
+from math import pi as PI
 
 from astropy.io import fits
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 from astropy.stats import sigma_clipped_stats
 from ccdproc import CCDData
 from photutils.background import Background2D
 from photutils.detection import find_peaks
 from shutil import copyfile
+
+class SolveFieldError(Exception):
+    pass
 
 
 def findfilesindir(p):
@@ -29,6 +35,7 @@ def findfilesindir(p):
     else:
         raise Exception(f"{p} isn't a file or directory")
 
+
 def checkiffileneedsupdate(infiles: [Path],outfile: Path) -> bool:
     if not outfile.exists():
         return True
@@ -42,16 +49,43 @@ def checkiffileneedsupdate(infiles: [Path],outfile: Path) -> bool:
         return True
     return False
 
+def pixel_scale(header):
+    xpixsz = header["XPIXSZ"] # micron
+    ypixsz = header["YPIXSZ"]
+    fl = header["FOCALLEN"] # mm
+    platescale = 1./fl      # radians / mm
+    platescale *= 180./PI # deg / mm
+    platescale *= 60.*60. # arcsec / mm
+    platescale /= 1000. # arcsec / micron
+    xpixelscale = platescale * xpixsz
+    ypixelscale = platescale * ypixsz
+    return xpixelscale, ypixelscale
+
 
 def runastrometrydotnet(fn,exedir,header,astrometrytimeout):
     print("Running solve-field ...")
-    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--guess-scale","--no-plots","-D",exedir,"-l",f"{astrometrytimeout:.0f}",fn]
+    command = ["solve-field","--scale-units","arcsecperpix","--guess-scale","--no-plots","-D",exedir,"-l",f"{astrometrytimeout:.0f}",fn]
+    try:
+        ra = header["RA"]
+        dec = header["DEC"]
+        coord = SkyCoord(ra,dec,unit=(u.hourangle,u.deg))
+        command += ["--ra",str(coord.ra.value),"--dec",str(coord.dec.value),"--radius","10"]
+    except KeyError:
+        pass
+    try:
+        xpixelscale, ypixelscale = pixel_scale(header)
+        minpixelscale = min(xpixelscale,ypixelscale)*0.5
+        maxpixelscale = max(xpixelscale,ypixelscale)*2.
+        command += ["--scale-low", f"{minpixelscale:.4f}","--scale-high", f"{maxpixelscale:.4f}"]
+    except KeyError:
+        command += ["--scale-low", "0.1"]
+    print(command)
     subprocess.run(command,cwd=exedir,check=True)
     result = fn.with_suffix(".new")
     if result.exists():
         return result
     else:
-        raise Exception(f"solve-field did not solve (or no WCS file was written)")
+        raise SolveFieldError(f"solve-field did not solve (or no WCS file was written)")
 
 
 def analyze(fn,outdir,astrometrytimeout):
@@ -77,7 +111,7 @@ def analyze(fn,outdir,astrometrytimeout):
             header = hdu.header.copy()
         try:
             adnfn = runastrometrydotnet(tmpfn,tempdir,header,astrometrytimeout)
-        except Exception as e:
+        except (subprocess.CalledProcessError,SolveFieldError) as e:
             print(f"Error: {e}, skipping file.")
             return
         with fits.open(adnfn,mode="update") as hdul:
