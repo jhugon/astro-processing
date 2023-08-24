@@ -29,10 +29,23 @@ def findfilesindir(p):
     else:
         raise Exception(f"{p} isn't a file or directory")
 
+def checkiffileneedsupdate(infiles: [Path],outfile: Path) -> bool:
+    if not outfile.exists():
+        return True
+    outfilemtime = outfile.stat().st_mtime
+    infilemtime = float('-inf')
+    for infile in infiles:
+        infilestat = infile.stat()
+        if infilestat.st_mtime > infilemtime:
+            infilemtime = infilestat.st_mtime
+    if infilemtime > outfilemtime:
+        return True
+    return False
 
-def runastrometrydotnet(fn,exedir):
+
+def runastrometrydotnet(fn,exedir,header,astrometrytimeout):
     print("Running solve-field ...")
-    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--guess-scale","--no-plots",fn]
+    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--guess-scale","--no-plots","-D",exedir,"-l",f"{astrometrytimeout:.0f}",fn]
     subprocess.run(command,cwd=exedir,check=True)
     result = fn.with_suffix(".new")
     if result.exists():
@@ -41,8 +54,13 @@ def runastrometrydotnet(fn,exedir):
         raise Exception(f"solve-field did not solve (or no WCS file was written)")
 
 
-def analyze(fn,outdir):
+def analyze(fn,outdir,astrometrytimeout):
     print(f"Analyzing {fn} ...")
+    iszipped = fn.suffix == ".zip"
+    outfile = ( outdir / fn.stem ).with_suffix( ".fit")
+    if not checkiffileneedsupdate([fn],outfile):
+        print(f"No update needed for output file {outfile}")
+        return
     with TemporaryDirectory() as tempdir:
         tmpfn = fn
         if fn.suffix == ".zip":
@@ -53,8 +71,12 @@ def analyze(fn,outdir):
                 return
             else:
                 tmpfn = Path(tempdir) / Path(fn.stem)
+        header = None
+        with fits.open(tmpfn) as hdul:
+            hdu = hdul[0]
+            header = hdu.header.copy()
         try:
-            adnfn = runastrometrydotnet(tmpfn,tempdir)
+            adnfn = runastrometrydotnet(tmpfn,tempdir,header,astrometrytimeout)
         except Exception as e:
             print(f"Error: {e}, skipping file.")
             return
@@ -68,18 +90,20 @@ def analyze(fn,outdir):
             hdu.header["BKMEAN"] = mean
             hdu.header["BKMEDIAN"] = median
             hdu.header["BKSTD"] = median
-        outfile = ( outdir / tmpfn.stem ).with_suffix( ".fit")
         copyfile(adnfn,outfile)
 
 
 def main():
+    DEFAULTTIMEOUT=300.
+
     import argparse
     parser = argparse.ArgumentParser(
         prog="imageanalysisplatesolve.py",
         description="Creates new copies of images with fits headers including WCS, FWHM, background, noise, and S/N. Standard WCS fits headers are added as well as BKMEAN, BKMEDIAN, and BKSTD, which are the 3-sigma-clipped mean, median, and standard-deviation of the image."
     )
-    parser.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files")
-    parser.add_argument("outdir",type=Path,help="Directory where output files will be written")
+    parser.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files.")
+    parser.add_argument("outdir",type=Path,help="Directory where output files will be written.")
+    parser.add_argument("--astrometry-timeout",'-l',type=float,help=f"Timeout for astrometry for each image. Default: {DEFAULTTIMEOUT:.0f} s. Timed-out images are skipped.",default=DEFAULTTIMEOUT)
 
     args = parser.parse_args()
 
@@ -100,7 +124,7 @@ def main():
     for indir in indirs:
         infiles += findfilesindir(indir)
     for infile in infiles:
-        analyze(infile,outdir)
+        analyze(infile,outdir,args.astrometry_timeout)
     
         
 

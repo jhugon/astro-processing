@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from imageanalysisplatesolve import findfilesindir
+from imageanalysisplatesolve import findfilesindir, checkiffileneedsupdate
 from pathlib import Path
 from astropy.io import fits
 from reproject import reproject_interp
@@ -75,7 +75,7 @@ def groupfiles(allfns):
                 result[key][0].append(fn)
             except KeyError:
                 result[key] = ([fn],imgdata)
-    for key in result:
+    for key in sorted(result):
         print(key)
         print(result[key][1])
         for fn in result[key][0]:
@@ -95,19 +95,26 @@ def stack(fnlist,outfn,outdir):
         refhdu = refhdul[0]
         for fn in fnlist[1:]:
             print(f"Reprojecting {fn} to reference {reffn} ...")
+            reproject_fn = reprojectdir / Path(fn.stem + ".fit")
+            if not checkiffileneedsupdate([fn],reproject_fn):
+                print(f"No update needed for output file {reproject_fn}")
+                continue
             with fits.open(fn) as hdul:
                 hdu = hdul[0]
                 reproject_array, reproject_footprint = reproject_interp(hdu,refhdu.header)
-                reproject_fn = reprojectdir / Path(fn.stem + ".fit")
                 reproject_header = fits.Header({"RPRJTO":str(reffn)})
                 fits.writeto(reproject_fn,reproject_array,reproject_header,overwrite=True)
                 reproject_fns.append(reproject_fn)
-    ccddatas = [CCDData.read(fn,unit="adu") for fn in [reffn]+reproject_fns]
     print(f"Combining images...")
+    combine_input_files = [reffn]+reproject_fns
+    if not checkiffileneedsupdate(combine_input_files,outdir / outfn):
+        print(f"No update needed for output file {outdir / outfn}")
+        return
+    ccddatas = [CCDData.read(fn,unit="adu") for fn in combine_input_files]
     combiner = Combiner(ccddatas)
     combiner.sigma_clipping()
     avgimg = combiner.average_combine()
-    avgimg.write(outdir / outfn)
+    avgimg.write(outdir / outfn, overwrite=True)
     print(f"Wrote out {outdir / outfn}")
 
 
@@ -139,7 +146,7 @@ def main():
     for indir in indirs:
         infiles += findfilesindir(indir)
     groups = groupfiles(infiles)
-    for key in groups:
+    for key in sorted(groups):
         stack(groups[key][0],key,outdir)
 
 if __name__ == "__main__":
