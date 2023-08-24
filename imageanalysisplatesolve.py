@@ -32,7 +32,7 @@ def findfilesindir(p):
 
 def runastrometrydotnet(fn,exedir):
     print("Running solve-field ...")
-    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--no-plots",fn]
+    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--guess-scale","--no-plots",fn]
     subprocess.run(command,cwd=exedir,check=True)
     result = fn.with_suffix(".new")
     if result.exists():
