@@ -76,7 +76,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(
         prog="imageanalysisplatesolve.py",
-        description="Creates new copies of images with fits headers including WCS, FWHM, background, noise, and S/N"
+        description="Creates new copies of images with fits headers including WCS, FWHM, background, noise, and S/N. Standard WCS fits headers are added as well as BKMEAN, BKMEDIAN, and BKSTD, which are the 3-sigma-clipped mean, median, and standard-deviation of the image."
     )
     parser.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files")
     parser.add_argument("outdir",type=Path,help="Directory where output files will be written")
