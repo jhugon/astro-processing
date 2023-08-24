@@ -31,10 +31,14 @@ def findfilesindir(p):
 
 
 def runastrometrydotnet(fn,exedir):
-    print("Running astrometry.net ...")
-    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.25","--scale-high","10","--no-plots",fn]
+    print("Running solve-field ...")
+    command = ["solve-field","--scale-units","arcsecperpix","--scale-low", "0.1","--no-plots",fn]
     subprocess.run(command,cwd=exedir,check=True)
-    return fn.with_suffix(".new")
+    result = fn.with_suffix(".new")
+    if result.exists():
+        return result
+    else:
+        raise Exception(f"solve-field did not solve (or no WCS file was written)")
 
 
 def analyze(fn,outdir):
@@ -52,7 +56,7 @@ def analyze(fn,outdir):
         try:
             adnfn = runastrometrydotnet(tmpfn,tempdir)
         except Exception as e:
-            print("Error: {e}, skipping file.")
+            print(f"Error: {e}, skipping file.")
             return
         with fits.open(adnfn,mode="update") as hdul:
             hdu = hdul[0]
