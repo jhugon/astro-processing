@@ -102,7 +102,6 @@ def analyze_fwhm(hdu):
     apertures = CircularAperture(positions,r=10.0)
 
     stats = ApertureStats(hdu.data-hdu.header["BKMEAN"],apertures)
-    skystats = A
     sigmaclip = SigmaClip()
     fwhm_sigclip = sigmaclip(stats.fwhm)
     fwhm_sigclip_mean = fwhm_sigclip.mean()
