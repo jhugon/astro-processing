@@ -77,7 +77,7 @@ def runastrometrydotnet(fn,exedir,header,astrometrytimeout):
         minpixelscale = min(xpixelscale,ypixelscale)*0.5
         maxpixelscale = max(xpixelscale,ypixelscale)*2.
         command += ["--scale-low", f"{minpixelscale:.4f}","--scale-high", f"{maxpixelscale:.4f}"]
-    except KeyError:
+    except (KeyError,ZeroDivisionError):
         command += ["--scale-low", "0.1"]
     print(command)
     subprocess.run(command,cwd=exedir,check=True)
@@ -87,10 +87,8 @@ def runastrometrydotnet(fn,exedir,header,astrometrytimeout):
     else:
         raise SolveFieldError(f"solve-field did not solve (or no WCS file was written)")
 
-
 def analyze(fn,outdir,astrometrytimeout):
     print(f"Analyzing {fn} ...")
-    iszipped = fn.suffix == ".zip"
     outfile = ( outdir / fn.stem ).with_suffix( ".fit")
     if not checkiffileneedsupdate([fn],outfile):
         print(f"No update needed for output file {outfile}")
@@ -105,6 +103,13 @@ def analyze(fn,outdir,astrometrytimeout):
                 return
             else:
                 tmpfn = Path(tempdir) / Path(fn.stem)
+                if not tmpfn.exists():
+                    dircontents = [ x for x in Path(tempdir).iterdir()]
+                    if len(dircontents) == 1:
+                        tmpfn = dircontents[0]
+                    else:
+                        print(f"Error: directory empty after unzipping {fn}")
+                        return
         header = None
         with fits.open(tmpfn) as hdul:
             hdu = hdul[0]
@@ -114,17 +119,18 @@ def analyze(fn,outdir,astrometrytimeout):
         except (subprocess.CalledProcessError,SolveFieldError) as e:
             print(f"Error: {e}, skipping file.")
             return
-        with fits.open(adnfn,mode="update") as hdul:
-            hdu = hdul[0]
-            print("Analyzing background ...")
-            mean, median, std = sigma_clipped_stats(hdu.data,sigma=3.0)
-            print(f"Mean Background:   {mean:.1f} ADU")
-            print(f"Median Background: {median:.1f} ADU")
-            print(f"Noise:             {std:.1f} ADU")
-            hdu.header["BKMEAN"] = mean
-            hdu.header["BKMEDIAN"] = median
-            hdu.header["BKSTD"] = median
-        copyfile(adnfn,outfile)
+        else:
+            with fits.open(adnfn,mode="update") as hdul:
+                hdu = hdul[0]
+                print("Analyzing background ...")
+                mean, median, std = sigma_clipped_stats(hdu.data,sigma=3.0)
+                print(f"Mean Background:   {mean:.1f} ADU")
+                print(f"Median Background: {median:.1f} ADU")
+                print(f"Noise:             {std:.1f} ADU")
+                hdu.header["BKMEAN"] = mean
+                hdu.header["BKMEDIAN"] = median
+                hdu.header["BKSTD"] = median
+            copyfile(adnfn,outfile)
 
 
 def main():
