@@ -4,15 +4,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
 from math import pi as PI
+from shutil import copyfile
 
+import numpy as np
 from astropy.io import fits
 from astropy import units as u
+from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
-from astropy.stats import sigma_clipped_stats
+from astropy.stats import sigma_clipped_stats, SigmaClip
 from ccdproc import CCDData
 from photutils.background import Background2D
 from photutils.detection import find_peaks
-from shutil import copyfile
+from photutils.aperture import CircularAperture
+from photutils.aperture import ApertureStats
 
 class SolveFieldError(Exception):
     pass
@@ -87,6 +91,37 @@ def runastrometrydotnet(fn,exedir,header,astrometrytimeout):
     else:
         raise SolveFieldError(f"solve-field did not solve (or no WCS file was written)")
 
+def analyze_fwhm(hdu):
+    """
+    Writes the result to the input hdu header
+    """
+    print("Analyzing FWHM...")
+
+    peaks = find_peaks(hdu.data, threshold=hdu.header["BKMEAN"]+5.0*hdu.header["BKSTD"], box_size=31, npeaks=300)
+    positions = np.transpose((peaks['x_peak'],peaks['y_peak']))
+    apertures = CircularAperture(positions,r=10.0)
+
+    stats = ApertureStats(hdu.data-hdu.header["BKMEAN"],apertures)
+    skystats = A
+    sigmaclip = SigmaClip()
+    fwhm_sigclip = sigmaclip(stats.fwhm)
+    fwhm_sigclip_mean = fwhm_sigclip.mean()
+    hdu.header["FWHMPX"] = fwhm_sigclip_mean.value
+    print(f"FWHM: {fwhm_sigclip_mean.value:.2f} pixels")
+
+    #import matplotlib.pyplot as plt
+    #from astropy.visualization import SqrtStretch
+    #from astropy.visualization.mpl_normalize import ImageNormalize
+    #norm = ImageNormalize(stretch=SqrtStretch())
+    #plt.imshow(hdu.data, cmap='Greys', origin='lower',norm=norm)
+    #apertures.plot(color='blue',lw=1.5,alpha=0.5)
+    #plt.show()
+    #plt.hist(stats.fwhm,100)
+    #plt.axvline(fwhm_sigclip_mean.value)
+    #plt.xlim(0,10)
+    #plt.show()
+    
+
 def analyze(fn,outdir,astrometrytimeout):
     print(f"Analyzing {fn} ...")
     outfile = ( outdir / fn.stem ).with_suffix( ".fit")
@@ -130,6 +165,7 @@ def analyze(fn,outdir,astrometrytimeout):
                 hdu.header["BKMEAN"] = mean
                 hdu.header["BKMEDIAN"] = median
                 hdu.header["BKSTD"] = median
+                analyze_fwhm(hdu)
             copyfile(adnfn,outfile)
 
 
