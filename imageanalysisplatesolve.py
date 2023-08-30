@@ -105,7 +105,7 @@ def analyze_fwhm(hdu):
     sigmaclip = SigmaClip()
     fwhm_sigclip = sigmaclip(stats.fwhm)
     fwhm_sigclip_mean = fwhm_sigclip.mean()
-    hdu.header["FWHMPX"] = fwhm_sigclip_mean.value
+    hdu.header["FWHMPX"] = (fwhm_sigclip_mean.value,"[pixels] 3-sigma clipped mean of 300 brightest stars in image")
     print(f"FWHM: {fwhm_sigclip_mean.value:.2f} pixels")
 
     #import matplotlib.pyplot as plt
@@ -161,9 +161,9 @@ def analyze(fn,outdir,astrometrytimeout):
                 print(f"Mean Background:   {mean:.1f} ADU")
                 print(f"Median Background: {median:.1f} ADU")
                 print(f"Noise:             {std:.1f} ADU")
-                hdu.header["BKMEAN"] = mean
-                hdu.header["BKMEDIAN"] = median
-                hdu.header["BKSTD"] = median
+                hdu.header["BKMEAN"] = (mean,"[ADU] 3-sigma clipped")
+                hdu.header["BKMEDIAN"] = (median,"[ADU] 3-sigma clipped") 
+                hdu.header["BKSTD"] = (median,"[ADU] 3-sigma clipped")
                 analyze_fwhm(hdu)
             copyfile(adnfn,outfile)
 
