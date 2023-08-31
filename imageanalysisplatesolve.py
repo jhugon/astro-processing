@@ -17,6 +17,7 @@ from photutils.background import Background2D
 from photutils.detection import find_peaks
 from photutils.aperture import CircularAperture
 from photutils.aperture import ApertureStats
+from astroquery.vizier import Vizier
 
 class SolveFieldError(Exception):
     pass
@@ -97,7 +98,8 @@ def analyze_fwhm(hdu):
     """
     print("Analyzing FWHM...")
 
-    peaks = find_peaks(hdu.data, threshold=hdu.header["BKMEAN"]+5.0*hdu.header["BKSTD"], box_size=31, npeaks=300)
+    wcs = WCS(hdu.header)
+    peaks = find_peaks(hdu.data, threshold=hdu.header["BKMEAN"]+5.0*hdu.header["BKSTD"], box_size=31, npeaks=300,wcs=wcs)
     positions = np.transpose((peaks['x_peak'],peaks['y_peak']))
     apertures = CircularAperture(positions,r=10.0)
 
@@ -119,7 +121,17 @@ def analyze_fwhm(hdu):
     #plt.axvline(fwhm_sigclip_mean.value)
     #plt.xlim(0,10)
     #plt.show()
+
+    analyze_limiting_mag(hdu,peaks)
     
+def analyze_limiting_mag(hdu,peaks):
+    catalogs = [
+        "II/183A/table2", # Landolt 1992
+        "J/AJ/133/2502", # Landolt 2007
+        "J/AJ/146/131", # Landolt 2013
+    ]
+    cats = Vizier.get_catalogs(catalogs)
+    #breakpoint()
 
 def analyze(fn,outdir,astrometrytimeout):
     print(f"Analyzing {fn} ...")
