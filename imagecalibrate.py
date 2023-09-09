@@ -4,17 +4,38 @@ from imageanalysisplatesolve import findfilesindir, checkiffileneedsupdate
 from imagestack import groupfiles
 from pathlib import Path
 from astropy.io import fits
-from ccdproc import Combiner, CCDData
+from ccdproc import Combiner, CCDData, subtract_dark, flat_correct
 
 import sys
 import numpy as np
 
+def make_key(headers):
+    result = {}
+    for key in ["exposure","ccd-temp","gain"]:
+        result[key] = headers[key]
+    return result
+
+def get_dark(key,darks):
+    print(f"light key: {key}")
+    for dark in darks:
+        ccd = CCDData.read(dark,unit="adu")
+        print(f"dark key: {make_key(ccd.header)}")
+        if make_key(ccd.header) == key:
+            return ccd
+    raise Exception(f"Dark not found.")
+
 def calibrate(fnlist,outdir,darks,flats):
-    groups = groupfiles(fnlist)
-    for key in sorted(groups):
-        fns, imgdata = groups[key]
-        print(imgdata)
-        print(fns)
+    for fn in fnlist:
+        ccd = CCDData.read(fn,unit="adu")
+        exposure = ccd.header["EXPOSURE"]
+        temp = ccd.header["SET-TEMP"]
+        gain = ccd.header["GAIN"]
+        print(f"Calibrating {fn} {exposure} s {temp} C {gain} gain...")
+        light_key = make_key(ccd.header)
+        dark = get_dark(light_key,darks)
+        dark_sub_ccd = subtract_dark(ccd,dark)
+        corr_ccd = flat_correct(ccd,flat)
+        corr_ccd.write(outdir / fn)
 
 def stackdarks(fnlist,outdir):
     pass
