@@ -12,8 +12,33 @@ import numpy as np
 
 def make_key(headers):
     result = {}
-    for key in ["exposure","ccd-temp","gain"]:
+    for key in ["exposure","ccd-temp","gain","xbinning","ybinning","set-temp","imagetyp","date-obs","bayerpat","egain"]:
         result[key] = headers[key]
+    if result["xbinning"] != result["ybinning"]:
+        raise Exception("xbinning != ybinning")
+    return result
+
+def groupfiles(allfns):
+    result = {}
+    for fn in allfns:
+        with fits.open(fn) as hdul:
+            header = hdul[0].header
+            keydict = make_key(header)
+            exposure = keydict["exposure"]
+            ccdtemp = keydict["ccd-temp"]
+            gain = keydict["gain"]
+            xbinning = keydict["xbinning"]
+            ybinning = keydict["ybinning"]
+            key = f"masterdark-gain{gain}-xbin{xbinning}-ybin{ybinning}-temp{ccdtemp:.0f}-exp{exposure:.0f}.fit"
+            try:
+                result[key][0].append(fn)
+            except KeyError:
+                result[key] = ([fn],keydict)
+    for key in sorted(result):
+        print(key)
+        print(result[key][1])
+        for fn in result[key][0]:
+            print("   ",fn)
     return result
 
 def get_dark(key,darks):
@@ -89,10 +114,17 @@ def stackdarks(args):
     infiles = []
     for indir in indirs:
         infiles += findfilesindir(indir)
-    combiner = Combiner(map(lambda x: CCDData.read(x,unit="adu"),infiles))
-    masterdark = combiner.average_combine()
-    breakpoint()
-    #masterdark.write()
+    groups = groupfiles(infiles)
+    for outfnbase in groups:
+        outfn = outdir / outfnbase
+        print(f"Stacking {outfn} ...")
+        fns, info = groups[outfnbase]
+        combiner = Combiner(map(lambda x: CCDData.read(x,unit="adu"),fns))
+        combiner.sigma_clipping()
+        masterdark = combiner.average_combine()
+        for key in info:
+            masterdark.header[key] = info[key]
+        masterdark.write(outdir / outfnbase,overwrite=True)
 
 def stackflats(fnlist,outdir):
     pass
@@ -106,8 +138,8 @@ def main():
 
     subparsers = parser.add_subparsers()
     parser_lights = subparsers.add_parser("lights",help="Calibrates light frames")
-    parser_darks = subparsers.add_parser("darks",help="Stacks dark frames")
-    parser_flats = subparsers.add_parser("flats",help="Stacks and normalizes flat frames")
+    parser_darks = subparsers.add_parser("darks",help="Stacks dark frames. Overwrites master darks in output directory with combination of whatever is found in input directory. Does 3σ clipping.")
+    parser_flats = subparsers.add_parser("flats",help="Stacks and normalizes flat frames. Overwrites master flats in output directory with combination of whatever is found in input directory. Does 3σ clipping.")
 
     parser_lights.set_defaults(func=calibratelights)
     parser_darks.set_defaults(func=stackdarks)
