@@ -10,30 +10,31 @@ from ccdproc import Combiner, CCDData, subtract_dark, flat_correct
 import sys
 import numpy as np
 
-def make_key(headers):
+def get_headers(headers):
     result = {}
     for key in ["exposure","ccd-temp","gain","xbinning","ybinning","set-temp","imagetyp","date-obs","bayerpat","egain"]:
         result[key] = headers[key]
-    if result["xbinning"] != result["ybinning"]:
-        raise Exception("xbinning != ybinning")
     return result
+
+def make_key(headers):
+    exposure = headers["exposure"]
+    temp = headers["set-temp"]
+    gain = headers["gain"]
+    xbinning = headers["xbinning"]
+    ybinning = headers["ybinning"]
+    key = f"gain{gain}-xbin{xbinning}-ybin{ybinning}-temp{temp:.0f}-exp{exposure:.0f}"
+    return key
 
 def groupfiles(allfns):
     result = {}
     for fn in allfns:
         with fits.open(fn) as hdul:
             header = hdul[0].header
-            keydict = make_key(header)
-            exposure = keydict["exposure"]
-            ccdtemp = keydict["ccd-temp"]
-            gain = keydict["gain"]
-            xbinning = keydict["xbinning"]
-            ybinning = keydict["ybinning"]
-            key = f"masterdark-gain{gain}-xbin{xbinning}-ybin{ybinning}-temp{ccdtemp:.0f}-exp{exposure:.0f}.fit"
+            key = make_key(header)
             try:
                 result[key][0].append(fn)
             except KeyError:
-                result[key] = ([fn],keydict)
+                result[key] = ([fn],get_headers(header))
     for key in sorted(result):
         print(key)
         print(result[key][1])
@@ -60,14 +61,18 @@ def calibratelights(args):
             raise Exception(f"{indir} doesn't exist")
         if not indir.is_dir():
             raise Exception(f"{indir} isn't a directory")
-    #if not args.darks.exists():
-    #    raise Exception(f"{args.darks} doesn't exist")
-    #if not args.darks.is_dir():
-    #    raise Exception(f"{args.darks} isn't a directory")
-    #if not args.flats.exists():
-    #    raise Exception(f"{args.flats} doesn't exist")
-    #if not args.flats.is_dir():
-    #    raise Exception(f"{args.flats} isn't a directory")
+    darkfns = None
+    if args.darks:
+        if not args.darks.exists():
+            raise Exception(f"{args.darks} doesn't exist")
+        if not args.darks.is_dir():
+            raise Exception(f"{args.darks} isn't a directory")
+        darkfns = findfilesindir(args.darks)
+    if args.flats:
+        if not args.flats.exists():
+            raise Exception(f"{args.flats} doesn't exist")
+        if not args.flats.is_dir():
+            raise Exception(f"{args.flats} isn't a directory")
     if not outdir.exists():
         outdir.mkdir(parents=True)
     if not outdir.is_dir():
@@ -77,23 +82,21 @@ def calibratelights(args):
     for indir in indirs:
         infiles += findfilesindir(indir)
 
-    dark = args.dark
-    flat = args.flat
-
     for fn in infiles:
         outfn = Path(str(outdir / fn.stem) + ".fit")
+        if not checkiffileneedsupdate([fn],outfn):
+            continue
         ccd = CCDData.read(fn,unit="adu")
         exposure = ccd.header["EXPOSURE"]
         temp = ccd.header["SET-TEMP"]
         gain = ccd.header["GAIN"]
         print(f"Calibrating {fn} {exposure} s {temp} C {gain} gain...")
-        #light_key = make_key(ccd.header)
-        #dark = get_dark(light_key,darks)
-        if args.dark:
-            dark = CCDData.read(args.dark,unit="adu")
+        if darkfns:
+            light_key = make_key(ccd.header)
+            dark = get_dark(light_key,darkfns)
             ccd = subtract_dark(ccd,dark,exposure_time="EXPOSURE",exposure_unit=u.second)
-        if args.flat:
-            flat = CCDData.read(args.flat,unit="adu")
+        if args.flats:
+            raise NotImplementedError()
             ccd = flat_correct(ccd,flat)
         ccd.write(outfn,overwrite=True)
 
@@ -115,10 +118,11 @@ def stackdarks(args):
     for indir in indirs:
         infiles += findfilesindir(indir)
     groups = groupfiles(infiles)
-    for outfnbase in groups:
+    for key in groups:
+        outfnbase = "masterdark-" + key + ".fit"
         outfn = outdir / outfnbase
         print(f"Stacking {outfn} ...")
-        fns, info = groups[outfnbase]
+        fns, info = groups[key]
         combiner = Combiner(map(lambda x: CCDData.read(x,unit="adu"),fns))
         combiner.sigma_clipping()
         masterdark = combiner.average_combine()
@@ -127,7 +131,7 @@ def stackdarks(args):
         masterdark.write(outdir / outfnbase,overwrite=True)
 
 def stackflats(fnlist,outdir):
-    pass
+    raise NotImplementedError()
 
 def main():
     import argparse
@@ -147,8 +151,8 @@ def main():
 
     parser_lights.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files")
     parser_lights.add_argument("outdir",type=Path,help="Directory where output files will be written")
-    parser_lights.add_argument("--dark",type=Path,help="File to use for dark calibration")
-    parser_lights.add_argument("--flat",type=Path,help="File to use for flat calibration")
+    parser_lights.add_argument("--darks",type=Path,help="Directory to find master darks")
+    parser_lights.add_argument("--flats",type=Path,help="Directory to find master flats")
 
     parser_darks.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files")
     parser_darks.add_argument("outdir",type=Path,help="Directory where output files will be written")
