@@ -72,8 +72,27 @@ def calibratelights(args):
             ccd = flat_correct(ccd,flat)
         ccd.write(outfn,overwrite=True)
 
-def stackdarks(fnlist,outdir):
-    pass
+def stackdarks(args):
+    indirs = args.indir
+    outdir = args.outdir
+
+    for indir in indirs:
+        if not indir.exists():
+            raise Exception(f"{indir} doesn't exist")
+        if not indir.is_dir():
+            raise Exception(f"{indir} isn't a directory")
+    if not outdir.exists():
+        outdir.mkdir(parents=True)
+    if not outdir.is_dir():
+        raise IOError(f"{outdir} isn't a directory")
+
+    infiles = []
+    for indir in indirs:
+        infiles += findfilesindir(indir)
+    combiner = Combiner(map(lambda x: CCDData.read(x,unit="adu"),infiles))
+    masterdark = combiner.average_combine()
+    breakpoint()
+    #masterdark.write()
 
 def stackflats(fnlist,outdir):
     pass
@@ -98,6 +117,9 @@ def main():
     parser_lights.add_argument("outdir",type=Path,help="Directory where output files will be written")
     parser_lights.add_argument("--dark",type=Path,help="File to use for dark calibration")
     parser_lights.add_argument("--flat",type=Path,help="File to use for flat calibration")
+
+    parser_darks.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files")
+    parser_darks.add_argument("outdir",type=Path,help="Directory where output files will be written")
 
     args = parser.parse_args()
     args.func(args)
