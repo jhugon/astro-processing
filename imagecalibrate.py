@@ -6,6 +6,7 @@ from pathlib import Path
 from astropy.io import fits
 import astropy.units as u
 from ccdproc import Combiner, CCDData, subtract_dark, flat_correct
+from astropy.wcs import FITSFixedWarning
 
 import sys
 import numpy as np
@@ -134,7 +135,9 @@ def stackflats(fnlist,outdir):
     raise NotImplementedError()
 
 def main():
+    from astropy import log
     import argparse
+    import warnings
     parser = argparse.ArgumentParser(
         prog="imagecalibrate.py",
         description="Calibrates light frames by subtracting darks, and dividing by flats. Also stacks darks and flats when using the appropriate options."
@@ -156,6 +159,9 @@ def main():
 
     parser_darks.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files")
     parser_darks.add_argument("outdir",type=Path,help="Directory where output files will be written")
+
+    warnings.simplefilter("ignore", FITSFixedWarning)
+    log.setLevel("WARNING")
 
     args = parser.parse_args()
     args.func(args)
