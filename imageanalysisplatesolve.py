@@ -156,10 +156,15 @@ def analyze(fn,outdir,astrometrytimeout):
                     else:
                         print(f"Error: directory empty after unzipping {fn}")
                         return
+        else:
+            tmpfn = Path(tempdir) / "infile.fit"
+            tmpfn.symlink_to(Path(fn).absolute())
         header = None
         with fits.open(tmpfn) as hdul:
             hdu = hdul[0]
             header = hdu.header.copy()
+        if "BAYERPAT" in header:
+            raise ValueError(f"Image '{fn}' should already be demosaiced, but BAYERPAT is in header")
         try:
             adnfn = runastrometrydotnet(tmpfn,tempdir,header,astrometrytimeout)
         except (subprocess.CalledProcessError,SolveFieldError) as e:
@@ -212,7 +217,6 @@ def main():
         infiles += findfilesindir(indir)
     for infile in infiles:
         analyze(infile,outdir,args.astrometry_timeout)
-    
         
 
 if __name__ == "__main__":
