@@ -44,13 +44,11 @@ def groupfiles(allfns):
     return result
 
 def get_dark(key,darks):
-    print(f"light key: {key}")
     for dark in darks:
         ccd = CCDData.read(dark,unit="adu")
-        print(f"dark key: {make_key(ccd.header)}")
         if make_key(ccd.header) == key:
             return ccd
-    raise Exception(f"Dark not found.")
+    raise Exception(f"Dark not found for light key: {key}")
 
 def calibratelights(args):
 
@@ -94,7 +92,11 @@ def calibratelights(args):
         print(f"Calibrating {fn} {exposure} s {temp} C {gain} gain...")
         if darkfns:
             light_key = make_key(ccd.header)
-            dark = get_dark(light_key,darkfns)
+            try:
+                dark = get_dark(light_key,darkfns)
+            except Exception as e:
+                print(f"Error: {e}",file=sys.stderr)
+                continue
             ccd = subtract_dark(ccd,dark,exposure_time="EXPOSURE",exposure_unit=u.second)
         if args.flats:
             raise NotImplementedError()
