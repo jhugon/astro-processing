@@ -10,6 +10,8 @@ from astropy.wcs import FITSFixedWarning
 
 import sys
 import numpy as np
+import cv2 as cv
+
 
 def get_headers(headers):
     result = {}
@@ -50,6 +52,27 @@ def get_dark(key,darks):
             return ccd
     raise Exception(f"Dark not found for light key: {key}")
 
+def _get_bayer_code(ccd):
+    bayerpat = ccd.header["bayerpat"].strip()
+    match bayerpat:
+        case "RGGB":
+            #return cv.COLOR_BayerRGGB2RGB
+            return cv.COLOR_BayerRGGB2GRAY
+        case "BGGR":
+            #return cv.COLOR_BayerBGGR2RGB
+            return cv.COLOR_BayerBGGR2GRAY
+        case _:
+            ValueError(f"Bayerpat string '{bayerpat}' not recognized")
+
+def demosaic(ccd):
+    if ccd.header["bayerpat"]:
+        resultdata = cv.demosaicing(ccd.data,_get_bayer_code(ccd))
+        result = CCDData(resultdata,unit=u.adu,header=ccd.header)
+        result.header.pop("bayerpat")
+        return result
+    else:
+        return ccd
+
 def calibratelights(args):
 
     indirs = args.indir
@@ -86,6 +109,8 @@ def calibratelights(args):
         if not checkiffileneedsupdate([fn],outfn):
             continue
         ccd = CCDData.read(fn,unit="adu")
+        if ccd.header["bayerpat"]:
+            ccd = demosaic(ccd)
         exposure = ccd.header["EXPOSURE"]
         temp = ccd.header["SET-TEMP"]
         gain = ccd.header["GAIN"]
@@ -100,7 +125,7 @@ def calibratelights(args):
             ccd = subtract_dark(ccd,dark,exposure_time="EXPOSURE",exposure_unit=u.second)
         if args.flats:
             raise NotImplementedError()
-            ccd = flat_correct(ccd,flat)
+            #ccd = flat_correct(ccd,flat)
         ccd.write(outfn,overwrite=True)
 
 def stackdarks(args):
@@ -126,7 +151,7 @@ def stackdarks(args):
         outfn = outdir / outfnbase
         print(f"Stacking {outfn} ...")
         fns, info = groups[key]
-        combiner = Combiner(map(lambda x: CCDData.read(x,unit="adu"),fns))
+        combiner = Combiner(map(lambda fn: demosaic(CCDData.read(fn,unit="adu")),fns))
         combiner.sigma_clipping()
         masterdark = combiner.average_combine()
         for key in info:
