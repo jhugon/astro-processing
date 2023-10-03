@@ -67,9 +67,11 @@ def pixel_scale(header):
     return xpixelscale, ypixelscale
 
 
-def runastrometrydotnet(fn,exedir,header,astrometrytimeout):
+def runastrometrydotnet(fn,exedir,header,astrometrytimeout,debug=False):
     print("Running solve-field ...")
     command = ["solve-field","--scale-units","arcsecperpix","--guess-scale","--no-plots","-D",exedir,"-l",f"{astrometrytimeout:.0f}",fn]
+    if not debug:
+        command += ["--no-plots"]
     try:
         ra = header["RA"]
         dec = header["DEC"]
@@ -98,8 +100,10 @@ def analyze_fwhm(hdu):
     """
     print("Analyzing FWHM...")
 
+    npeaks = 100
+
     wcs = WCS(hdu.header)
-    peaks = find_peaks(hdu.data, threshold=hdu.header["BKMEAN"]+5.0*hdu.header["BKSTD"], box_size=31, npeaks=300,wcs=wcs)
+    peaks = find_peaks(hdu.data, threshold=hdu.header["BKMEAN"]+5.0*hdu.header["BKSTD"], box_size=31, npeaks=npeaks,wcs=wcs)
     positions = np.transpose((peaks['x_peak'],peaks['y_peak']))
     apertures = CircularAperture(positions,r=10.0)
 
@@ -107,7 +111,7 @@ def analyze_fwhm(hdu):
     sigmaclip = SigmaClip()
     fwhm_sigclip = sigmaclip(stats.fwhm)
     fwhm_sigclip_mean = fwhm_sigclip.mean()
-    hdu.header["FWHMPX"] = (fwhm_sigclip_mean.value,"[pixels] 3-sigma clipped mean of 300 brightest stars in image")
+    hdu.header["FWHMPX"] = (fwhm_sigclip_mean.value,f"[pixels] 3sig mean of {npeaks} brt stars")
     print(f"FWHM: {fwhm_sigclip_mean.value:.2f} pixels")
 
     #import matplotlib.pyplot as plt
@@ -133,8 +137,9 @@ def analyze_limiting_mag(hdu,peaks):
     cats = Vizier.get_catalogs(catalogs)
     #breakpoint()
 
-def analyze(fn,outdir,astrometrytimeout):
+def analyze(fn,outdir,astrometrytimeout,astrometrydebug):
     print(f"Analyzing {fn} ...")
+    fn = fn.absolute()
     outfile = ( outdir / fn.stem ).with_suffix( ".fit")
     if not checkiffileneedsupdate([fn],outfile):
         print(f"No update needed for output file {outfile}")
@@ -168,6 +173,17 @@ def analyze(fn,outdir,astrometrytimeout):
         try:
             adnfn = runastrometrydotnet(tmpfn,tempdir,header,astrometrytimeout)
         except (subprocess.CalledProcessError,SolveFieldError) as e:
+            if astrometrydebug:
+                print(f"Error: {e}")
+                #import os
+                #os.environ['XPA_METHOD'] = "local"
+                import imexam
+                viewer = imexam.connect()
+                viewer.load_fits(str(tmpfn))
+                viewer.scale()
+                viewer.imexam()
+                viewer.close()
+                breakpoint()
             print(f"Error: {e}, skipping file.")
             return
         else:
@@ -180,7 +196,7 @@ def analyze(fn,outdir,astrometrytimeout):
                 print(f"Noise:             {std:.1f} ADU")
                 hdu.header["BKMEAN"] = (mean,"[ADU] 3-sigma clipped")
                 hdu.header["BKMEDIAN"] = (median,"[ADU] 3-sigma clipped") 
-                hdu.header["BKSTD"] = (median,"[ADU] 3-sigma clipped")
+                hdu.header["BKSTD"] = (std,"[ADU] 3-sigma clipped")
                 analyze_fwhm(hdu)
             copyfile(adnfn,outfile)
 
@@ -196,6 +212,7 @@ def main():
     parser.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files.")
     parser.add_argument("outdir",type=Path,help="Directory where output files will be written.")
     parser.add_argument("--astrometry-timeout",'-l',type=float,help=f"Timeout for astrometry for each image. Default: {DEFAULTTIMEOUT:.0f} s. Timed-out images are skipped.",default=DEFAULTTIMEOUT)
+    parser.add_argument("--astrometry-debug",action="store_true",help=f"Creates images and pauses if astrometric solution not found")
 
     args = parser.parse_args()
 
@@ -216,7 +233,7 @@ def main():
     for indir in indirs:
         infiles += findfilesindir(indir)
     for infile in infiles:
-        analyze(infile,outdir,args.astrometry_timeout)
+        analyze(infile,outdir,args.astrometry_timeout,args.astrometry_debug)
         
 
 if __name__ == "__main__":

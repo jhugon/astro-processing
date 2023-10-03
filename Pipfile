@@ -11,6 +11,7 @@ bottleneck = "~=1.3.7"
 astroalign = "~=2.4.2"
 astroquery = "~=0.4.6"
 opencv-python = "*"
+imexam = "~=0.9.1"
 
 [dev-packages]
 
