@@ -12,6 +12,7 @@ astroalign = "~=2.4.2"
 astroquery = "~=0.4.6"
 opencv-python = "*"
 imexam = "~=0.9.1"
+requests-cache = "~=1.1.0"
 
 [dev-packages]
 
