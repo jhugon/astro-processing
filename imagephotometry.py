@@ -2,7 +2,6 @@
 
 from pathlib import Path
 import re
-import requests_cache
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,39 +21,12 @@ from astroquery.vizier import Vizier
 
 from imageanalysisplatesolve import findfilesindir, checkiffileneedsupdate
 
-def parse_target(fn: Path):
-    m = re.match(r"calibrated-([tT]\d+)-\w+-(\w+)-\d+-\d+-(\w+)-BIN\d+-\w-\d+-\d+.fit",fn.name)
-    if m:
-        return m.group(2)
-    else:
-        raise ValueError(f"Can't parse filename: {fn.name}")
-
-def load_vsp(ra,dec,std_field=False,session=None):
-    url = f"https://app.aavso.org/vsp/api/chart/"
-    params = {
-        "ra": ra,
-        "dec": dec,
-        "fov": 40,
-        "maglimit": 16.5,
-    }
-    headers = {
-        "Accept": "application/json",
-    }
-    if std_field:
-        params["special"] = "std_field"
-    response = session.get(url,params=params,headers=headers)
-    response.raise_for_status()
-    data = response.json()
-    photometry = data["photometry"]
-    return photometry
-    
-def analyze(fn,outdir,session):
+def analyze(fn,outdir):
     print(f"Analyzing {fn} ...")
     outfile = ( outdir / fn.stem ).with_suffix( ".fit")
     if not checkiffileneedsupdate([fn],outfile):
         print(f"No update needed for output file {outfile}")
         return
-    target = parse_target(fn)
     with fits.open(fn) as hdul:
         hdu = hdul[0]
         fwhmpx = hdu.header['FWHMPX']
@@ -75,14 +47,6 @@ def analyze(fn,outdir,session):
 
         bkgstats = ApertureStats(hdu.data,annuluses,sigma_clip=SigmaClip(sigma=3.0,maxiters=10))
         aperstats = ApertureStats(hdu.data, apertures,sigma_clip=None)
-
-        #vsp_data = load_vsp(hdu.header["RA"],hdu.header["DEC"],True,session)
-        #skypos = SkyCoord(ra=[line["ra"] for line in vsp_data],dec=[line["dec"] for line in vsp_data],unit=(u.hourangle,u.deg))
-        #pixpos = skypos.to_pixel(wcs)
-        #skyaperture = SkyCircularAperture(skypos,r=15*u.arcsec)
-        #pixaperture = CircularAperture(zip(*pixpos),r=int(fwhmpx*2))
-        #pixaperstats = ApertureStats(hdu.data, pixaperture)
-        ##pixap_patches = pixaperture.plot(color='red')
 
         #norm = simple_norm(hdu.data,'sqrt',percent=99)
         #plt.imshow(hdu.data,norm=norm,interpolation="nearest")
@@ -140,9 +104,8 @@ def main():
     for indir in indirs:
         infiles += findfilesindir(indir)
 
-    session = requests_cache.CachedSession()
     for infile in infiles:
-        analyze(infile,outdir,session)
+        analyze(infile,outdir)
         
 
 if __name__ == "__main__":
