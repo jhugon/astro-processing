@@ -90,6 +90,26 @@ def analyze(fn,outdir,session):
         #an_patches = annuluses.plot(color='white')
         #plt.show()
 
+        # Output file
+
+        hdul_out = fits.HDUList()
+        phottable = aperstats.to_table()
+        photbktable = bkgstats.to_table()
+        del phottable["sky_centroid"]
+        del photbktable["sky_centroid"]
+        sources_hdu = fits.BinTableHDU(sources,name="SOURCES")
+        phottable_header = fits.Header()
+        phottable_header["R"] = aperture_R
+        photbktable_header = fits.Header()
+        photbktable_header["RIN"] = annulus_Rin
+        photbktable_header["ROUT"] = annulus_Rout
+        phottable_hdu = fits.BinTableHDU(phottable,name="PHOT",header=phottable_header)
+        photbktable_hdu = fits.BinTableHDU(photbktable,name="PHOTBG",header=photbktable_header)
+        hdul_out.append(hdu)
+        hdul_out.append(sources_hdu)
+        hdul_out.append(phottable_hdu)
+        hdul_out.append(photbktable_hdu)
+        hdul_out.writeto(outfile,overwrite=True)
 
 def main():
 
