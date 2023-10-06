@@ -15,8 +15,8 @@ from astropy.stats import sigma_clipped_stats, SigmaClip
 from astropy.visualization import simple_norm
 from ccdproc import CCDData
 from photutils.background import Background2D
-from photutils.detection import find_peaks
-from photutils.aperture import CircularAperture, SkyCircularAperture
+from photutils.detection import DAOStarFinder
+from photutils.aperture import CircularAperture, SkyCircularAperture, CircularAnnulus
 from photutils.aperture import ApertureStats
 from astroquery.vizier import Vizier
 
@@ -62,17 +62,33 @@ def analyze(fn,outdir,session):
         bkstd = hdu.header["BKSTD"]
         print(f"FWHM: {fwhmpx} pix, bkg: {bkmean}, std: {bkstd}")
         wcs = WCS(hdu.header)
-        vsp_data = load_vsp(hdu.header["RA"],hdu.header["DEC"],True,session)
-        skypos = SkyCoord(ra=[line["ra"] for line in vsp_data],dec=[line["dec"] for line in vsp_data],unit=(u.hourangle,u.deg))
-        pixpos = skypos.to_pixel(wcs)
-        skyaperture = SkyCircularAperture(skypos,r=15*u.arcsec)
-        pixaperture = CircularAperture(zip(*pixpos),r=int(fwhmpx*2))
-        aperstats = ApertureStats(hdu.data, pixaperture)
+        #bkg2d = Background2D(hdu.data, 64, filter_size = 3)
 
-        norm = simple_norm(hdu.data,'sqrt',percent=99)
-        plt.imshow(hdu.data,norm=norm,interpolation="nearest")
-        ap_patches = pixaperture.plot(color='white',lw=2)
-        plt.show()
+        daofind = DAOStarFinder(fwhm=fwhmpx, threshold = 5 * bkstd)
+        sources = daofind(hdu.data - bkmean)
+        positions = np.transpose((sources['xcentroid'], sources['ycentroid']))
+        aperture_R = fwhmpx*1.75
+        annulus_Rin = fwhmpx*5
+        annulus_Rout = fwhmpx*9
+        annuluses = CircularAnnulus(positions, r_in=annulus_Rin, r_out=annulus_Rout)
+        apertures = CircularAperture(positions, r=aperture_R)
+
+        bkgstats = ApertureStats(hdu.data,annuluses,sigma_clip=SigmaClip(sigma=3.0,maxiters=10))
+        aperstats = ApertureStats(hdu.data, apertures,sigma_clip=None)
+
+        #vsp_data = load_vsp(hdu.header["RA"],hdu.header["DEC"],True,session)
+        #skypos = SkyCoord(ra=[line["ra"] for line in vsp_data],dec=[line["dec"] for line in vsp_data],unit=(u.hourangle,u.deg))
+        #pixpos = skypos.to_pixel(wcs)
+        #skyaperture = SkyCircularAperture(skypos,r=15*u.arcsec)
+        #pixaperture = CircularAperture(zip(*pixpos),r=int(fwhmpx*2))
+        #pixaperstats = ApertureStats(hdu.data, pixaperture)
+        ##pixap_patches = pixaperture.plot(color='red')
+
+        #norm = simple_norm(hdu.data,'sqrt',percent=99)
+        #plt.imshow(hdu.data,norm=norm,interpolation="nearest")
+        #ap_patches = apertures.plot(color='white')
+        #an_patches = annuluses.plot(color='white')
+        #plt.show()
 
 
 def main():
