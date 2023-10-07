@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from astropy.io import fits
+from astropy.table import QTable
 from astropy import units as u
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -32,6 +33,7 @@ def analyze(fn,outdir):
         fwhmpx = hdu.header['FWHMPX']
         bkmean = hdu.header["BKMEAN"]
         bkstd = hdu.header["BKSTD"]
+        exposure = float(hdu.header["EXPOSURE"])
         print(f"FWHM: {fwhmpx} pix, bkg: {bkmean}, std: {bkstd}")
         wcs = WCS(hdu.header)
         #bkg2d = Background2D(hdu.data, 64, filter_size = 3)
@@ -39,6 +41,7 @@ def analyze(fn,outdir):
         daofind = DAOStarFinder(fwhm=fwhmpx, threshold = 5 * bkstd)
         sources = daofind(hdu.data - bkmean)
         positions = np.transpose((sources['xcentroid'], sources['ycentroid']))
+        skypositions = SkyCoord.from_pixel(sources["xcentroid"],sources["ycentroid"],wcs)
         aperture_R = fwhmpx*1.75
         annulus_Rin = fwhmpx*5
         annulus_Rout = fwhmpx*9
@@ -48,31 +51,37 @@ def analyze(fn,outdir):
         bkgstats = ApertureStats(hdu.data,annuluses,sigma_clip=SigmaClip(sigma=3.0,maxiters=10))
         aperstats = ApertureStats(hdu.data, apertures,sigma_clip=None)
 
-        #norm = simple_norm(hdu.data,'sqrt',percent=99)
-        #plt.imshow(hdu.data,norm=norm,interpolation="nearest")
-        #ap_patches = apertures.plot(color='white')
-        #an_patches = annuluses.plot(color='white')
-        #plt.show()
+        flux = aperstats.sum
+        flux_bkg = bkgstats.mean * aperstats.sum_aper_area.value
+        flux_bkg_sub = flux-flux_bkg
+        instmag = -2.5 * np.log10(flux_bkg_sub/exposure)
+        
+        phottable = QTable([instmag,flux_bkg_sub,flux,flux_bkg,sources["xcentroid"],sources["ycentroid"],skypositions.ra.to_string("deg"),skypositions.dec.to_string("deg")],
+                            names=("Instrumental Magnitude","Flux - Background", "Flux", "Background Flux","x","y","ra","dec"),
+                            meta={"name": "PHOTTABLE","R":aperture_R,"RIN": annulus_Rin, "ROUT": annulus_Rout}
+                        )
 
         # Output file
 
         hdul_out = fits.HDUList()
-        phottable = aperstats.to_table()
-        photbktable = bkgstats.to_table()
-        del phottable["sky_centroid"]
-        del photbktable["sky_centroid"]
+        aperturetable = aperstats.to_table()
+        annulustable = bkgstats.to_table()
+        del aperturetable["sky_centroid"]
+        del annulustable["sky_centroid"]
         sources_hdu = fits.BinTableHDU(sources,name="SOURCES")
-        phottable_header = fits.Header()
-        phottable_header["R"] = aperture_R
-        photbktable_header = fits.Header()
-        photbktable_header["RIN"] = annulus_Rin
-        photbktable_header["ROUT"] = annulus_Rout
-        phottable_hdu = fits.BinTableHDU(phottable,name="PHOT",header=phottable_header)
-        photbktable_hdu = fits.BinTableHDU(photbktable,name="PHOTBG",header=photbktable_header)
+        aperturetable_header = fits.Header()
+        aperturetable_header["R"] = aperture_R
+        annulustable_header = fits.Header()
+        annulustable_header["RIN"] = annulus_Rin
+        annulustable_header["ROUT"] = annulus_Rout
+        phottable_hdu = fits.BinTableHDU(phottable,name="PHOT")
+        aperturetable_hdu = fits.BinTableHDU(aperturetable,name="APERTURE",header=aperturetable_header)
+        annulustable_hdu = fits.BinTableHDU(annulustable,name="ANNULUS",header=annulustable_header)
         hdul_out.append(hdu)
-        hdul_out.append(sources_hdu)
         hdul_out.append(phottable_hdu)
-        hdul_out.append(photbktable_hdu)
+        hdul_out.append(sources_hdu)
+        hdul_out.append(aperturetable_hdu)
+        hdul_out.append(annulustable_hdu)
         hdul_out.writeto(outfile,overwrite=True)
 
 def main():
