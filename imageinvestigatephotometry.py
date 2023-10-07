@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from astropy.io import fits
-from astropy.table import Table
+from astropy.table import Table, QTable
 from astropy import units as u
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -46,35 +46,64 @@ def load_vsp(ra,dec,std_field=False,session=None):
     response = session.get(url,params=params,headers=headers)
     response.raise_for_status()
     data = response.json()
+    print(data["chartid"],data["image_uri"])
     photometry = data["photometry"]
-    return photometry
+    newdata = []
+    for star in photometry:
+        newrow = {}
+        newrow["auid"] = star["auid"]
+        newrow["skypos"] = SkyCoord(ra=star["ra"],dec=star["dec"],unit=(u.hourangle,u.deg))
+        for band in star["bands"]:
+            newrow[band["band"]] = band["mag"] * u.mag
+            newrow[band["band"]+"error"] = band["error"] * u.mag
+        newdata.append(newrow)
+    result = QTable(rows=newdata)
+    return result
+
+def add_skypos_col(table,wcs):
+    table["skypos"] = SkyCoord.from_pixel(table["xcentroid"],table["ycentroid"],wcs)
     
 def analyze(fn,session):
     print(f"Analyzing {fn} ...")
     target = parse_target(fn)
+    std_field = bool(re.match(r"SA\d+(_\w+)?|GD\d+(_\w+)?|F\d+",target))
+    print(f"Target: {target}",f"std_field: {std_field}")
     with fits.open(fn) as hdul:
         image = hdul[0]
         wcs = WCS(image.header)
 
-        sources = Table.read(hdul[1])
-        phottable = Table.read(hdul[2])
-        photbktable = Table.read(hdul[3])
+        photometry = Table.read(hdul[1])
+        photometry["skypos"] = SkyCoord(ra=photometry["ra"],dec=photometry["dec"],unit=u.deg)
+        photometry["imagepos"] = np.transpose((photometry["x"],photometry["y"]))
 
-        breakpoint()
+        filtername = image.header["filter"]
+        R = photometry.meta["R"]
+        Rin = photometry.meta["RIN"]
+        Rout = photometry.meta["ROUT"]
 
-        vsp_data = load_vsp(image.header["RA"],image.header["DEC"],True,session)
-        #skypos = SkyCoord(ra=[line["ra"] for line in vsp_data],dec=[line["dec"] for line in vsp_data],unit=(u.hourangle,u.deg))
-        #pixpos = skypos.to_pixel(wcs)
-        #skyaperture = SkyCircularAperture(skypos,r=15*u.arcsec)
-        #pixaperture = CircularAperture(zip(*pixpos),r=int(fwhmpx*2))
-        #pixaperstats = ApertureStats(hdu.data, pixaperture)
-        ##pixap_patches = pixaperture.plot(color='red')
+        vsp_table = load_vsp(image.header["RA"],image.header["DEC"],std_field,session)
+        target_pos = SkyCoord(ra=image.header["RA"],dec=image.header["DEC"],unit=(u.hourangle,u.deg))
 
-        #norm = simple_norm(hdu.data,'sqrt',percent=99)
-        #plt.imshow(hdu.data,norm=norm,interpolation="nearest")
-        #ap_patches = apertures.plot(color='white')
-        #an_patches = annuluses.plot(color='white')
-        #plt.show()
+        idx, d2d, _ = vsp_table["skypos"].match_to_catalog_sky(photometry["skypos"])
+        idx_target, d2d_target, _ = target_pos.match_to_catalog_sky(photometry["skypos"])
+
+        print("VSP Stars:")
+        print(photometry[idx])
+
+        print("Target:")
+        print(photometry[idx_target])
+
+        apertures = CircularAperture(photometry["imagepos"],r=R)
+        vsp_apertures = CircularAperture(photometry[idx]["imagepos"],r=R)
+        vsp_annulus = CircularAperture(photometry[idx]["imagepos"],r=R)
+        target_annulus = CircularAperture(photometry[idx_target]["imagepos"],r=R)
+
+        norm = simple_norm(image.data,'sqrt',percent=99)
+        plt.imshow(image.data,norm=norm,interpolation="nearest")
+        ap_patches = apertures.plot(color='white')
+        vsp_ap_patches = vsp_apertures.plot(color='purple',lw=2)
+        target_ap_patches = target_apertures.plot(color='red',lw=2)
+        plt.show()
 
 
 def main():
