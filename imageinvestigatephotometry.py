@@ -90,19 +90,21 @@ def analyze(fn,session):
         print("VSP Stars:")
         print(photometry[idx])
 
-        print("Target:")
-        print(photometry[idx_target])
+        if not std_field:
+            print("Target:")
+            print(photometry[idx_target])
 
         apertures = CircularAperture(photometry["imagepos"],r=R)
         vsp_apertures = CircularAperture(photometry[idx]["imagepos"],r=R)
-        vsp_annulus = CircularAperture(photometry[idx]["imagepos"],r=R)
-        target_annulus = CircularAperture(photometry[idx_target]["imagepos"],r=R)
+        target_apertures = CircularAperture(photometry[idx_target]["imagepos"],r=R)
 
         norm = simple_norm(image.data,'sqrt',percent=99)
         plt.imshow(image.data,norm=norm,interpolation="nearest")
         ap_patches = apertures.plot(color='white')
         vsp_ap_patches = vsp_apertures.plot(color='purple',lw=2)
-        target_ap_patches = target_apertures.plot(color='red',lw=2)
+        target_ap_patches = None
+        if not std_field:
+            target_ap_patches = target_apertures.plot(color='red',lw=2)
         plt.show()
 
 
