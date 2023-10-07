@@ -140,6 +140,9 @@ def analyze_limiting_mag(hdu,peaks):
 def analyze(fn,outdir,astrometrytimeout,astrometrydebug):
     print(f"Analyzing {fn} ...")
     fn = fn.absolute()
+    if fn.stem[:4] == "raw-":
+        print(f"Not analyzing raw file, skipping")
+        return
     outfile = ( outdir / fn.stem ).with_suffix( ".fit")
     if not checkiffileneedsupdate([fn],outfile):
         print(f"No update needed for output file {outfile}")
