@@ -64,11 +64,11 @@ def load_vsp(ra,dec,std_field=False,session=None,filtername=None):
     result = QTable(rows=newdata)
     return result
 
-def load_vsx(target,session=None):
+def load_vsx(ra,dec,session=None):
     url = f"http://www.aavso.org/vsx/index.php"
     params = {
         "view": "query.votable",
-        "ident": target.replace("_"," "),
+        "coords": f"{ra} {dec}",
     }
     response = session.get(url,params=params)
     response.raise_for_status()
@@ -80,20 +80,29 @@ def load_vsx(target,session=None):
             fieldname = field.attrib["name"]
             fieldnames.append(fieldname)
         for tabledata in table.iter("TABLEDATA"):
-            for td in tabledata.iter("TD"):
-                fielddata.append(td.text)
-    for i in range(len(fielddata)):
-        if fieldnames[i] == "Coords(J2000)":
-            ra, dec = fielddata[i].split(',')
-            fielddata[i] = SkyCoord(ra=ra,dec=dec,unit=u.deg)
-            fieldnames[i] = "skypos"
-        try:
-            fielddata[i] = float(fielddata[i])
-        except ValueError:
-            pass
-        except TypeError:
-            pass
-    result = Table(rows=[fielddata],names=fieldnames)
+            for tr in tabledata.iter("TR"):
+                tablerow = []
+                for td in tr.iter("TD"):
+                    tablerow.append(td.text)
+                fielddata.append(tablerow)
+    if len(fielddata) == 0:
+        return None
+    for iRow in range(len(fielddata)):
+        for iCol in range(len(fieldnames)):
+            if fieldnames[iCol] == "Coords(J2000)":
+                ra, dec = fielddata[iRow][iCol].split(',')
+                fielddata[iRow][iCol] = SkyCoord(ra=ra,dec=dec,unit=u.deg)
+            try:
+                fielddata[iRow][iCol] = float(fielddata[iRow][iCol])
+            except ValueError:
+                pass
+            except TypeError:
+                pass
+    for iCol in range(len(fieldnames)):
+        if fieldnames[iCol] == "Coords(J2000)":
+            fieldnames[iCol] = "skypos"
+            break
+    result = Table(rows=fielddata,names=fieldnames)
     return result
 
 def add_phot_to_vsp_table(phot,vsp):
@@ -137,15 +146,18 @@ def analyze(fn,session):
         Rout = photometry.meta["ROUT"]
 
         vsp_table = load_vsp(image.header["RA"],image.header["DEC"],std_field,session,filtername=filtername)
-        vsx_table = load_vsx(target,session)
+        vsx_table = load_vsx(image.header["RA"],image.header["DEC"],session)
         #target_pos = SkyCoord(ra=image.header["RA"],dec=image.header["DEC"],unit=(u.hourangle,u.deg))
 
         combined_vsp_table = add_phot_to_vsp_table(photometry,vsp_table)
-        combined_vsx_table = add_phot_to_vsx_table(photometry,vsx_table)
+        combined_vsx_table = None
+        if vsx_table:
+            combined_vsx_table = add_phot_to_vsx_table(photometry,vsx_table)
 
         apertures = CircularAperture(photometry["imagepos"],r=R)
         vsp_apertures = CircularAperture(combined_vsp_table["imagepos"],r=R)
-        vsx_apertures = CircularAperture(combined_vsx_table["imagepos"],r=R)
+        if vsx_table:
+            vsx_apertures = CircularAperture(combined_vsx_table["imagepos"],r=R)
 
         print("VSP Stars:")
         print(combined_vsp_table)
@@ -157,7 +169,8 @@ def analyze(fn,session):
         plt.imshow(image.data,norm=norm,interpolation="nearest")
         ap_patches = apertures.plot(color='white')
         vsp_ap_patches = vsp_apertures.plot(color='purple',lw=2)
-        vsx_ap_patches = vsx_apertures.plot(color='red',lw=2)
+        if combined_vsx_table:
+            vsx_ap_patches = vsx_apertures.plot(color='red',lw=2)
         plt.show()
 
 
