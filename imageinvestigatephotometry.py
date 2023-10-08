@@ -30,7 +30,7 @@ def parse_target(fn: Path):
     else:
         raise ValueError(f"Can't parse filename: {fn.name}")
 
-def load_vsp(ra,dec,std_field=False,session=None):
+def load_vsp(ra,dec,std_field=False,session=None,filtername=None):
     url = f"https://app.aavso.org/vsp/api/chart/"
     params = {
         "ra": ra,
@@ -54,15 +54,23 @@ def load_vsp(ra,dec,std_field=False,session=None):
         newrow["auid"] = star["auid"]
         newrow["skypos"] = SkyCoord(ra=star["ra"],dec=star["dec"],unit=(u.hourangle,u.deg))
         for band in star["bands"]:
+            if filtername and filtername != band["band"]:
+                continue
             newrow[band["band"]] = band["mag"] * u.mag
             newrow[band["band"]+"error"] = band["error"] * u.mag
         newdata.append(newrow)
     result = QTable(rows=newdata)
     return result
 
-def add_skypos_col(table,wcs):
-    table["skypos"] = SkyCoord.from_pixel(table["xcentroid"],table["ycentroid"],wcs)
-    
+def add_phot_to_vsp_table(phot,vsp):
+    idx, d2d, _ = vsp["skypos"].match_to_catalog_sky(phot["skypos"])
+    result = vsp.copy()
+    del result["skypos"]
+    result["Match Distance"] = d2d.to(u.arcsec)
+    for colname in ["Instrumental Magnitude","Flux","Background Flux","skypos"]:
+        result[colname] = phot[colname][idx]
+    return result
+
 def analyze(fn,session):
     print(f"Analyzing {fn} ...")
     target = parse_target(fn)
@@ -72,31 +80,39 @@ def analyze(fn,session):
         image = hdul[0]
         wcs = WCS(image.header)
 
-        photometry = Table.read(hdul[1])
+        photometry = QTable.read(hdul[1])
         photometry["skypos"] = SkyCoord(ra=photometry["ra"],dec=photometry["dec"],unit=u.deg)
         photometry["imagepos"] = np.transpose((photometry["x"],photometry["y"]))
+        del photometry["x"]
+        del photometry["y"]
+        del photometry["ra"]
+        del photometry["dec"]
 
         filtername = image.header["filter"]
         R = photometry.meta["R"]
         Rin = photometry.meta["RIN"]
         Rout = photometry.meta["ROUT"]
 
-        vsp_table = load_vsp(image.header["RA"],image.header["DEC"],std_field,session)
+        vsp_table = load_vsp(image.header["RA"],image.header["DEC"],std_field,session,filtername=filtername)
         target_pos = SkyCoord(ra=image.header["RA"],dec=image.header["DEC"],unit=(u.hourangle,u.deg))
+
+        combined_table = add_phot_to_vsp_table(photometry,vsp_table)
 
         idx, d2d, _ = vsp_table["skypos"].match_to_catalog_sky(photometry["skypos"])
         idx_target, d2d_target, _ = target_pos.match_to_catalog_sky(photometry["skypos"])
 
+        apertures = CircularAperture(photometry["imagepos"],r=R)
+        vsp_apertures = CircularAperture(photometry[idx]["imagepos"],r=R)
+        target_apertures = CircularAperture(photometry[idx_target]["imagepos"],r=R)
+
+        del photometry["imagepos"]
+
         print("VSP Stars:")
-        print(photometry[idx])
+        print(combined_table)
 
         if not std_field:
             print("Target:")
             print(photometry[idx_target])
-
-        apertures = CircularAperture(photometry["imagepos"],r=R)
-        vsp_apertures = CircularAperture(photometry[idx]["imagepos"],r=R)
-        target_apertures = CircularAperture(photometry[idx_target]["imagepos"],r=R)
 
         norm = simple_norm(image.data,'sqrt',percent=99)
         plt.imshow(image.data,norm=norm,interpolation="nearest")
