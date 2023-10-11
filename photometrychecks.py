@@ -14,17 +14,38 @@ from astropy.time import Time, TimeDelta
 
 from imageanalysisplatesolve import findfilesindir, checkiffileneedsupdate
 
-def seperate_runs(table):
+def seperate_runs(fns: [Path]) -> [[Path]]:
+    """
+    Breaks up file list into groups of files "runs" seperated by 6000 seconds
+    or more. All files seperated by 6000 s or less are grouped together
+    """
+    fnjds = []
+    for fn in fns:
+        with fits.open(fn) as hdul:
+            image = hdul[0]
+            dateobsstr = image.header["date-obs"]
+            dateobs = Time(dateobsstr,format='isot',scale='utc')
+            jd = dateobs.tt
+            jd.format = "jd"
+            fnjds.append((fn,jd))
+    fnjds = sorted(fnjds,key= lambda x: x[1])
     iresults = [[0]]
-    for iRow in range(1,len(table)):
-        dt = table[iRow]["jd"]-table[iRow-1]["jd"]
+    for iRow in range(1,len(fnjds)):
+        dt = fnjds[iRow][1]-fnjds[iRow-1][1]
         if dt > TimeDelta(6000*u.second):
             iresults.append([iRow])
         else:
             iresults[-1].append(iRow)
     result = []
-    for ir in iresults:
-        result.append(table[ir])
+    for run in iresults:
+        result.append([])
+        for ir in run:
+            result[-1].append(fnjds[ir][0])
+    for iRun, run in enumerate(result):
+        print("Run: ",iRun)
+        for fn in run:
+            print(fn)
+    breakpoint()
     return result
 
 def sum_blocks_filters(table):
@@ -182,7 +203,7 @@ def analyze_by_individual_star(fns):
     fig.savefig("BminusV.png")
 
 def analyze_by_file(fns: [Path]) -> None:
-    analyze_by_individual_star(fns)
+    runs = seperate_runs(fns)
     for fn in fns:
         print(f"Analyzing {fn} ...")
         with fits.open(fn) as hdul:
@@ -243,8 +264,8 @@ def main():
 
     args = parser.parse_args()
 
-    analyze_by_individual_star(args.infile)
     analyze_by_file(args.infile)
+    analyze_by_individual_star(args.infile)
         
 
 if __name__ == "__main__":
