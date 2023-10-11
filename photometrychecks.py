@@ -82,14 +82,13 @@ def make_colors(table):
     result = QTable(rows=result_list,meta=table.meta)
     return result
 
-def analyze(fns: [Path]) -> None:
+def analyze_by_individual_star(fns):
     referenceMag = {}
     measurement = {}
     measurementtables = {}
     measurementallfilters = {}
     measurementallfilterstables = {}
     for fn in fns:
-        print(f"Analyzing {fn} ...")
         with fits.open(fn) as hdul:
             image = hdul[0]
             filtername = image.header["filter"]
@@ -97,7 +96,6 @@ def analyze(fns: [Path]) -> None:
             dateobs = Time(dateobsstr,format='isot',scale='utc')
             jd = dateobs.tt
             jd.format = "jd"
-            print(f"{dateobs} JD: {jd}")
 
             vsp_table = None
             vsx_table = None
@@ -117,11 +115,6 @@ def analyze(fns: [Path]) -> None:
                         del vsx_table["dec"]
                     except KeyError:
                         vsx_table = None
-
-            std_field = vsp_table.meta["std_field"]
-
-            if std_field:
-                print("This is a standard field")
 
             #print("VSP Stars:")
             #print(vsp_table)
@@ -188,6 +181,57 @@ def analyze(fns: [Path]) -> None:
     ax.set_ylabel("Measured B-V [mag]")
     fig.savefig("BminusV.png")
 
+def analyze_by_file(fns: [Path]) -> None:
+    analyze_by_individual_star(fns)
+    for fn in fns:
+        print(f"Analyzing {fn} ...")
+        with fits.open(fn) as hdul:
+            image = hdul[0]
+            filtername = image.header["filter"]
+            dateobsstr = image.header["date-obs"]
+            dateobs = Time(dateobsstr,format='isot',scale='utc')
+            jd = dateobs.tt
+            jd.format = "jd"
+            print(f"{dateobs} JD: {jd}")
+
+            vsp_table = None
+            vsx_table = None
+            for hdu in hdul:
+                if hdu.name == "VSP":
+                    vsp_table = QTable.read(hdu)
+                    del vsp_table["x"]
+                    del vsp_table["y"]
+                    del vsp_table["ra"]
+                    del vsp_table["dec"]
+                elif hdu.name == "VSX":
+                    try:
+                        vsx_table = QTable.read(hdu)
+                        del vsx_table["x"]
+                        del vsx_table["y"]
+                        del vsx_table["ra"]
+                        del vsx_table["dec"]
+                    except KeyError:
+                        vsx_table = None
+
+            std_field = vsp_table.meta["std_field"]
+
+            if std_field:
+                print("This is a standard field")
+
+            vsp_table["filter"] = [filtername]*len(vsp_table)
+            vsp_table["jd"] = [jd]*len(vsp_table)
+            vsp_table["refmag"] = vsp_table[filtername]
+            vsp_table["refmagerror"] = vsp_table[filtername+"error"]
+            vsp_table["refmagerror"] = vsp_table[filtername+"error"]
+            vsp_table["instmag"] = vsp_table["Instrumental Magnitude"]*u.mag
+            del vsp_table["Flux"]
+            del vsp_table["Background Flux"]
+            del vsp_table["Instrumental Magnitude"]
+            del vsp_table[filtername+"error"]
+            del vsp_table[filtername]
+
+            print(vsp_table)
+
 def main():
 
     import argparse
@@ -199,7 +243,8 @@ def main():
 
     args = parser.parse_args()
 
-    analyze(args.infile)
+    analyze_by_individual_star(args.infile)
+    analyze_by_file(args.infile)
         
 
 if __name__ == "__main__":
