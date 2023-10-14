@@ -39,6 +39,34 @@ def get_vsp_vsx_tables(fn):
                     vsx_table = None
         return vsp_table,vsx_table
 
+def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
+    result = vsp.copy()
+    names = ("auid","measmag","catmag","catmagerr","matchdist","isvsp")
+    auids = []
+    measmags = []
+    catmags = []
+    catmagerrs = []
+    matchdists = []
+    isvsps = []
+    for row in vsp:
+        auids.append(row["auid"])
+        measmags.append(row["Instrumental Magnitude"])
+        catmags.append(row[filtername])
+        catmagerrs.append(row[filtername+"error"])
+        matchdists.append(row["Match Distance"])
+        isvsps.append(True)
+    vsx_good_auids = vsx[np.logical_not(vsx["AUID"].mask)]
+    for row in vsx_good_auids:
+        auids.append(row["AUID"])
+        measmags.append(row["Instrumental Magnitude"])
+        catmags.append(None)
+        catmagerrs.append(None)
+        matchdists.append(row["Match Distance"])
+        isvsps.append(False)
+    meta = {"std_field":vsp.meta["std_field"],"filter":filtername}
+    result = QTable((auids,measmags,catmags,catmagerrs,matchdists,isvsps),names=names,meta=meta)
+    return result
+
 def seperate_runs(fns: [Path]) -> [[Path]]:
     """
     Breaks up file list into groups of files "runs" seperated by 6000 seconds
@@ -98,23 +126,26 @@ def average_vsp_tables(fns,filtername):
     catMagErr = {}
     matchDistance = {}
     measMag = {}
+    isVSP = {}
     jds = []
     for fn in fns:
-        vsp, _ = get_vsp_vsx_tables(fn)
+        vsp, vsx = get_vsp_vsx_tables(fn)
+        table = combine_vsp_vsx_tables(vsp,vsx,filtername)
         jds.append(get_image_jd_filter(fn)[0])
-        for row in vsp:
+        for row in table:
             auid = row["auid"]
-            catMag[auid] = row[filtername]
-            catMagErr[auid] = row[filtername+"error"]
+            catMag[auid] = row["catmag"]
+            catMagErr[auid] = row["catmagerr"]
+            isVSP[auid] = row["isvsp"]
             try:
-                matchDistance[auid] = max(row["Match Distance"],matchDistance[auid])
+                matchDistance[auid] = max(row["matchdist"],matchDistance[auid])
             except KeyError:
-                matchDistance[auid] = row["Match Distance"]
-                measMag[auid] = [row["Instrumental Magnitude"]]
+                matchDistance[auid] = row["matchdist"]
+                measMag[auid] = [row["measmag"]]
             else:
-                measMag[auid].append(row["Instrumental Magnitude"])
+                measMag[auid].append(row["measmag"])
     avgMag = {key:np.mean(measMag[key]) for key in measMag}
-    stdMag = {key:np.std(measMag[key]) for key in measMag}
+    stdMag = {key:np.std(measMag[key])/np.sqrt(len(measMag[key])) for key in measMag}
     auids = sorted(catMag.keys())
     result = QTable(
         [
@@ -124,8 +155,9 @@ def average_vsp_tables(fns,filtername):
             [catMag[auid] for auid in auids],
             [catMagErr[auid] for auid in auids],
             [matchDistance[auid] for auid in auids],
+            [isVSP[auid] for auid in auids],
         ],
-        names = ("auid","measmag","measmagerr","catmag","catmagerr","matchdist"),
+        names = ("auid","measmag","measmagerr","catmag","catmagerr","matchdist","isvsp"),
         meta = {"filter":filtername,"jds":jds}
     )
     return result
@@ -185,15 +217,11 @@ def combine_filters(tables: [Table]) -> Table:
             newrow[filtername+"measerr"] = row["measmagerr"]
             newrow[filtername+"cat"] = row["catmag"]
             newrow[filtername+"caterr"] = row["catmagerr"]
+            newrow["isvsp"] = row["isvsp"]
         newrows.append(newrow)
     result = QTable(rows=newrows,meta={"jds":newjds})
     breakpoint()
     return result
-
-def combine_obs_in_run(tables: [Table]) -> Table:
-    table_list = []
-    for table in tables:
-        jds = table.meta["jds"]
 
 
 def analyze_by_file(fns: [Path]) -> None:
@@ -204,7 +232,8 @@ def analyze_by_file(fns: [Path]) -> None:
         filter_group_lists = group_filters(filter_block_vsp_averages)
         # Below has a measurement and catalog value for each observed filter, but there are still multiple observations
         filters_grouped_list = [combine_filters(x) for x in filter_group_lists]
-        all_obs_in_run = astropy.table.vstack([ for x in filters_grouped_list])
+        for x in filters_grouped_list:
+            print(x)
 
 def main():
 
@@ -218,8 +247,6 @@ def main():
     args = parser.parse_args()
 
     analyze_by_file(args.infile)
-    analyze_by_individual_star(args.infile)
-        
 
 if __name__ == "__main__":
     main()
