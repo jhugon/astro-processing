@@ -55,14 +55,15 @@ def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
         catmagerrs.append(row[filtername+"error"])
         matchdists.append(row["Match Distance"])
         isvsps.append(True)
-    vsx_good_auids = vsx[np.logical_not(vsx["AUID"].mask)]
-    for row in vsx_good_auids:
-        auids.append(row["AUID"])
-        measmags.append(row["Instrumental Magnitude"])
-        catmags.append(None)
-        catmagerrs.append(None)
-        matchdists.append(row["Match Distance"])
-        isvsps.append(False)
+    if vsx:
+        vsx_good_auids = vsx[np.logical_not(vsx["AUID"].mask)]
+        for row in vsx_good_auids:
+            auids.append(row["AUID"])
+            measmags.append(row["Instrumental Magnitude"])
+            catmags.append(None)
+            catmagerrs.append(None)
+            matchdists.append(row["Match Distance"])
+            isvsps.append(False)
     meta = {"std_field":vsp.meta["std_field"],"filter":filtername}
     result = QTable((auids,measmags,catmags,catmagerrs,matchdists,isvsps),names=names,meta=meta)
     return result
@@ -150,8 +151,8 @@ def average_vsp_tables(fns,filtername):
     result = QTable(
         [
             auids,
-            [avgMag[auid] for auid in auids],
-            [stdMag[auid] for auid in auids],
+            [avgMag[auid]*u.mag for auid in auids],
+            [stdMag[auid]*u.mag for auid in auids],
             [catMag[auid] for auid in auids],
             [catMagErr[auid] for auid in auids],
             [matchDistance[auid] for auid in auids],
@@ -220,20 +221,61 @@ def combine_filters(tables: [Table]) -> Table:
             newrow["isvsp"] = row["isvsp"]
         newrows.append(newrow)
     result = QTable(rows=newrows,meta={"jds":newjds})
-    breakpoint()
     return result
 
-
-def analyze_by_file(fns: [Path]) -> None:
+def load_group_by_runs_filters(fns: [Path]) -> [[QTable]]:
     runs = seperate_runs(fns)
+    result = []
     for run in runs:
         filter_blocks = blocks_filters(run)
         filter_block_vsp_averages = [average_vsp_tables(filter_block,filtername) for filtername,filter_block in filter_blocks]
         filter_group_lists = group_filters(filter_block_vsp_averages)
         # Below has a measurement and catalog value for each observed filter, but there are still multiple observations
         filters_grouped_list = [combine_filters(x) for x in filter_group_lists]
-        for x in filters_grouped_list:
-            print(x)
+        result.append(filters_grouped_list)
+    return result
+
+def calibrate(tables: [[QTable]]) -> None:
+    def concatlistvalues(l):
+        return np.concatenate([x.value for x in l])
+    for filtername in ["B","V"]:
+        instcolorlist = []
+        catcolorlist = []
+        offsetcalibonlydifflist = []
+        matchdistancelist = []
+        for run in tables:
+            for obs in run:
+                obs = obs[obs["matchdist"] < 10*u.arcsec]
+                jds = Time(obs.meta["jds"]) # list of Times to Time with list
+                diff = obs[filtername+"meas"]-obs[filtername+"cat"]
+                instcolor = obs["Bmeas"]-obs["Vmeas"]
+                catcolor = obs["Bcat"]-obs["Vcat"]
+                print(jds)
+                print(jds.mean())
+                print(diff.mean())
+                print(obs)
+                offsetcalibonly = obs[filtername+"meas"]-diff.mean()
+                offsetcalibonlydiff = offsetcalibonly-obs[filtername+"cat"]
+                instcolorlist.append(instcolor)
+                catcolorlist.append(catcolor)
+                offsetcalibonlydifflist.append(offsetcalibonlydiff)
+                matchdistancelist.append(obs["matchdist"])
+        fig, (ax1,ax2,ax3) = plt.subplots(3,figsize=(6,10),constrained_layout=True)
+        fig.suptitle("Offset Calibration Only--No Color Calibration")
+        ax1.scatter(concatlistvalues(instcolorlist),concatlistvalues(offsetcalibonlydifflist))
+        ax1.set_xlabel("Instrumental B-V [mag]")
+        ax1.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax1.grid(True)
+        ax2.scatter(concatlistvalues(catcolorlist),concatlistvalues(offsetcalibonlydifflist))
+        ax2.set_xlabel("Catalog B-V [mag]")
+        ax2.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax2.grid(True)
+        ax3.scatter(concatlistvalues(matchdistancelist),concatlistvalues(offsetcalibonlydifflist))
+        ax3.set_xlabel("Match Distance [arcsecond]")
+        ax3.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax3.set_xscale("log")
+        ax3.grid(True)
+        fig.savefig(f"CalibOffsetOnly_{filtername}.png")
 
 def main():
 
@@ -246,7 +288,8 @@ def main():
 
     args = parser.parse_args()
 
-    analyze_by_file(args.infile)
+    tables = load_group_by_runs_filters(args.infile)
+    calibrate(tables)
 
 if __name__ == "__main__":
     main()
