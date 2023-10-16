@@ -63,12 +63,17 @@ def load_vsp(ra,dec,std_field=False,session=None,filtername=None):
     result = QTable(rows=newdata,meta={"std_field": std_field})
     return result
 
-def load_vsx(ra,dec,session=None):
+def load_vsx(ra=None,dec=None,ident=None,session=None):
     url = f"http://www.aavso.org/vsx/index.php"
     params = {
         "view": "query.votable",
-        "coords": f"{ra} {dec}",
     }
+    if ra and dec:
+        params["coords"] = f"{ra} {dec}"
+    elif ident:
+        params["ident"] = ident
+    else:
+        raise Exception(f"Must have either ra and dec or ident arguments")
     response = session.get(url,params=params)
     response.raise_for_status()
     xmltree = XMLElementTree.fromstring(response.text)

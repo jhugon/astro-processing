@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+import requests_cache
 
 from astropy import units as u
 from astropy.io import fits, votable
@@ -12,7 +13,7 @@ import astropy.table
 from astropy.table import Table, QTable
 from astropy.time import Time, TimeDelta
 
-from imageanalysisplatesolve import findfilesindir, checkiffileneedsupdate
+from imagephotometry import load_vsx
 
 def get_image_jd_filter(fn: Path) -> (Time,str):
     with fits.open(fn) as hdul:
@@ -247,6 +248,7 @@ def calibrate(tables: [[QTable]]) -> None:
         measerrlist = []
         for run in tables:
             for obs in run:
+                print(obs)
                 obs = obs[(obs["matchdist"] < 10*u.arcsec) & obs["isvsp"]]
                 jds = Time(obs.meta["jds"]) # list of Times to Time with list
                 diff = obs[filtername+"meas"]-obs[filtername+"cat"]
@@ -287,7 +289,64 @@ def calibrate(tables: [[QTable]]) -> None:
         fig.savefig(f"CalibOffsetOnly_{filtername}.png")
 
 def lightcurve(tables: [[QTable]], targetname: str) -> None:
-    pass
+    session = requests_cache.CachedSession()
+    vsx = load_vsx(ident=targetname,session=session)
+    targetname = vsx[0]["Name"]
+    targetauid = vsx[0]["AUID"]
+    targetepoch = vsx[0]["Epoch"]
+    targetperiod = TimeDelta(vsx[0]["Period"]*u.day)
+    targetrisepercent = vsx[0]["RiseDuration"]*u.percent
+    targetriseduration = vsx[0]["RiseDuration"]/100. * targetperiod
+    targetepoch = Time(2400000.+targetepoch,format="jd",scale="tt")
+    print(f"Target: {targetname} AUID: {targetauid} Epoch: {targetepoch} Period: {targetperiod} Rise Percent: {targetrisepercent} Rise Duration: {targetriseduration}")
+    compauids = set()
+    for run in tables:
+        for obs in run:
+            goodcomps = obs[(obs["matchdist"] < 10*u.arcsec) & obs["isvsp"]]
+            for auid in goodcomps["auid"]:
+                compauids.add(str(auid))
+    compauids = sorted(compauids)
+    jdsV = [[] for _ in compauids]
+    phaseV = [[] for _ in compauids]
+    magsV = [[] for _ in compauids]
+    magerrsV = [[] for _ in compauids]
+    jdsB = [[] for _ in compauids]
+    phaseB = [[] for _ in compauids]
+    magsB = [[] for _ in compauids]
+    magerrsB = [[] for _ in compauids]
+    for run in tables:
+        for obs in run:
+            measrow = obs[obs["auid"] == targetauid]
+            if measrow["matchdist"] > 10. * u.arcsec:
+                continue
+            jd = Time(obs.meta["jds"]).mean()
+            for iComp, compauid in enumerate(compauids):
+                comprow = obs[obs["auid"] == compauid]
+                if comprow["matchdist"] > 10. * u.arcsec:
+                    continue
+                magV = measrow["Vmeas"] - comprow["Vmeas"] + comprow["Vcat"]
+                magB = measrow["Bmeas"] - comprow["Bmeas"] + comprow["Bcat"]
+                magsV[iComp].append(magV.value[0])
+                magsB[iComp].append(magB.value[0])
+                magerrsV[iComp].append(measrow["Vmeaserr"].value[0])
+                magerrsB[iComp].append(measrow["Bmeaserr"].value[0])
+                jdsV[iComp].append(jd.value)
+                jdsB[iComp].append(jd.value)
+                phase = (jd-targetepoch).value % targetperiod.value
+                phaseV[iComp].append(phase)
+                phaseB[iComp].append(phase)
+    fig, ((ax1,ax3),(ax2,ax4)) = plt.subplots(2,2,figsize=(6,6),constrained_layout=True)#,sharex=True,sharey=True)
+    fig.suptitle(f"{targetname}, No Color Calibration")
+    for iComp, comp in enumerate(compauids):
+        ax1.errorbar(jdsB[iComp],magsB[iComp],yerr=magerrsB[iComp],ls="")
+        ax2.errorbar(jdsV[iComp],magsV[iComp],yerr=magerrsV[iComp],ls="")
+        ax3.errorbar(phaseB[iComp],magsB[iComp],yerr=magerrsB[iComp],ls="")
+        ax4.errorbar(phaseV[iComp],magsV[iComp],yerr=magerrsV[iComp],ls="")
+    ax1.set_ylabel(f"B [mag]")
+    ax2.set_xlabel("JD")
+    ax2.set_ylabel(f"V [mag]")
+    ax4.set_xlabel("Phase [T = {targetperiod} d]")
+    fig.savefig(f"Phot-{targetname.replace(' ','_')}.png")
 
 def main():
 
@@ -305,7 +364,7 @@ def main():
 
     tables = load_group_by_runs_filters(args.infile)
     if args.target:
-        lightcurve(tables,target)
+        lightcurve(tables,args.target)
     else:
         calibrate(tables)
 
