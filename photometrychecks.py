@@ -60,8 +60,8 @@ def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
         for row in vsx_good_auids:
             auids.append(row["AUID"])
             measmags.append(row["Instrumental Magnitude"])
-            catmags.append(None)
-            catmagerrs.append(None)
+            catmags.append(float('nan')*u.mag)
+            catmagerrs.append(float('nan')*u.mag)
             matchdists.append(row["Match Distance"])
             isvsps.append(False)
     meta = {"std_field":vsp.meta["std_field"],"filter":filtername}
@@ -241,26 +241,26 @@ def calibrate(tables: [[QTable]]) -> None:
     for filtername in ["B","V"]:
         instcolorlist = []
         catcolorlist = []
+        catmaglist = []
         offsetcalibonlydifflist = []
         matchdistancelist = []
+        measerrlist = []
         for run in tables:
             for obs in run:
-                obs = obs[obs["matchdist"] < 10*u.arcsec]
+                obs = obs[(obs["matchdist"] < 10*u.arcsec) & obs["isvsp"]]
                 jds = Time(obs.meta["jds"]) # list of Times to Time with list
                 diff = obs[filtername+"meas"]-obs[filtername+"cat"]
                 instcolor = obs["Bmeas"]-obs["Vmeas"]
                 catcolor = obs["Bcat"]-obs["Vcat"]
-                print(jds)
-                print(jds.mean())
-                print(diff.mean())
-                print(obs)
                 offsetcalibonly = obs[filtername+"meas"]-diff.mean()
                 offsetcalibonlydiff = offsetcalibonly-obs[filtername+"cat"]
                 instcolorlist.append(instcolor)
                 catcolorlist.append(catcolor)
+                catmaglist.append(obs[filtername+"cat"])
+                measerrlist.append(obs[filtername+"measerr"])
                 offsetcalibonlydifflist.append(offsetcalibonlydiff)
                 matchdistancelist.append(obs["matchdist"])
-        fig, (ax1,ax2,ax3) = plt.subplots(3,figsize=(6,10),constrained_layout=True)
+        fig, (ax1,ax2,ax3,ax4,ax5) = plt.subplots(5,figsize=(6,10),constrained_layout=True)
         fig.suptitle("Offset Calibration Only--No Color Calibration")
         ax1.scatter(concatlistvalues(instcolorlist),concatlistvalues(offsetcalibonlydifflist))
         ax1.set_xlabel("Instrumental B-V [mag]")
@@ -270,26 +270,44 @@ def calibrate(tables: [[QTable]]) -> None:
         ax2.set_xlabel("Catalog B-V [mag]")
         ax2.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
         ax2.grid(True)
-        ax3.scatter(concatlistvalues(matchdistancelist),concatlistvalues(offsetcalibonlydifflist))
-        ax3.set_xlabel("Match Distance [arcsecond]")
+        ax3.scatter(concatlistvalues(catmaglist),concatlistvalues(offsetcalibonlydifflist))
+        ax3.set_xlabel(f"Catalog {filtername} [mag]")
         ax3.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
-        ax3.set_xscale("log")
         ax3.grid(True)
+        ax4.scatter(concatlistvalues(measerrlist),concatlistvalues(offsetcalibonlydifflist))
+        ax4.set_xlabel("Estimated Measured {filtername} Uncertainty [mag]")
+        ax4.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax4.set_xscale("log")
+        ax4.grid(True)
+        ax5.scatter(concatlistvalues(matchdistancelist),concatlistvalues(offsetcalibonlydifflist))
+        ax5.set_xlabel("Match Distance [arcsec]")
+        ax5.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax5.set_xscale("log")
+        ax5.grid(True)
         fig.savefig(f"CalibOffsetOnly_{filtername}.png")
+
+def lightcurve(tables: [[QTable]], targetname: str) -> None:
+    pass
 
 def main():
 
     import argparse
     parser = argparse.ArgumentParser(
         prog="imageimvestigatephotometry.py",
-        description="Investiage photometry script output."
+        description="If --target is present, then computes the light curve for the given target star. Otherwise, produces calibration plots assuming standard fields"
     )
     parser.add_argument("infile",type=Path,nargs="+",help="Input fits file(s)")
+    parser.add_argument("--target",type=str,help="Target star AUID")
+    parser.add_argument("--comp",type=str,help="Comparison star AUID")
+    parser.add_argument("--check",type=str,help="Check star AUID")
 
     args = parser.parse_args()
 
     tables = load_group_by_runs_filters(args.infile)
-    calibrate(tables)
+    if args.target:
+        lightcurve(tables,target)
+    else:
+        calibrate(tables)
 
 if __name__ == "__main__":
     main()
