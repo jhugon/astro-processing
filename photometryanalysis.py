@@ -51,7 +51,7 @@ def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
     isvsps = []
     for row in vsp:
         auids.append(row["auid"])
-        measmags.append(row["Instrumental Magnitude"])
+        measmags.append(row["Instrumental Magnitude"]*u.mag)
         catmags.append(row[filtername])
         catmagerrs.append(row[filtername+"error"])
         matchdists.append(row["Match Distance"])
@@ -60,7 +60,7 @@ def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
         vsx_good_auids = vsx[np.logical_not(vsx["AUID"].mask)]
         for row in vsx_good_auids:
             auids.append(row["AUID"])
-            measmags.append(row["Instrumental Magnitude"])
+            measmags.append(row["Instrumental Magnitude"]*u.mag)
             catmags.append(float('nan')*u.mag)
             catmagerrs.append(float('nan')*u.mag)
             matchdists.append(row["Match Distance"])
@@ -361,7 +361,7 @@ def main():
 
     import argparse
     parser = argparse.ArgumentParser(
-        prog="imageimvestigatephotometry.py",
+        prog="photometryanalysis.py",
         description="If --target is present, then computes the light curve for the given target star. Otherwise, produces calibration plots assuming standard fields"
     )
     parser.add_argument("infile",type=Path,nargs="+",help="Input fits file(s)")
