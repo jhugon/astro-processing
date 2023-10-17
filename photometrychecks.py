@@ -263,27 +263,28 @@ def calibrate(tables: [[QTable]]) -> None:
                 offsetcalibonlydifflist.append(offsetcalibonlydiff)
                 matchdistancelist.append(obs["matchdist"])
         fig, (ax1,ax2,ax3,ax4,ax5) = plt.subplots(5,figsize=(6,10),constrained_layout=True)
+        yaxis_label = f"{filtername} Cal - Cat [mag]"
         fig.suptitle("Offset Calibration Only--No Color Calibration")
         ax1.scatter(concatlistvalues(instcolorlist),concatlistvalues(offsetcalibonlydifflist))
         ax1.set_xlabel("Instrumental B-V [mag]")
-        ax1.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax1.set_ylabel(yaxis_label)
         ax1.grid(True)
         ax2.scatter(concatlistvalues(catcolorlist),concatlistvalues(offsetcalibonlydifflist))
         ax2.set_xlabel("Catalog B-V [mag]")
-        ax2.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax2.set_ylabel(yaxis_label)
         ax2.grid(True)
         ax3.scatter(concatlistvalues(catmaglist),concatlistvalues(offsetcalibonlydifflist))
         ax3.set_xlabel(f"Catalog {filtername} [mag]")
-        ax3.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax3.set_ylabel(yaxis_label)
         ax3.grid(True)
         ax4.scatter(concatlistvalues(measerrlist),concatlistvalues(offsetcalibonlydifflist))
-        ax4.set_xlabel("Estimated Measured {filtername} Uncertainty [mag]")
-        ax4.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax4.set_xlabel(f"Estimated Measured {filtername} Uncertainty [mag]")
+        ax4.set_ylabel(yaxis_label)
         ax4.set_xscale("log")
         ax4.grid(True)
         ax5.scatter(concatlistvalues(matchdistancelist),concatlistvalues(offsetcalibonlydifflist))
         ax5.set_xlabel("Match Distance [arcsec]")
-        ax5.set_ylabel(f"{filtername} Calibrated - Catalog [mag]")
+        ax5.set_ylabel(yaxis_label)
         ax5.set_xscale("log")
         ax5.grid(True)
         fig.savefig(f"CalibOffsetOnly_{filtername}.png")
@@ -294,10 +295,16 @@ def lightcurve(tables: [[QTable]], targetname: str) -> None:
     targetname = vsx[0]["Name"]
     targetauid = vsx[0]["AUID"]
     targetepoch = vsx[0]["Epoch"]
-    targetperiod = TimeDelta(vsx[0]["Period"]*u.day)
-    targetrisepercent = vsx[0]["RiseDuration"]*u.percent
-    targetriseduration = vsx[0]["RiseDuration"]/100. * targetperiod
-    targetepoch = Time(2400000.+targetepoch,format="jd",scale="tt")
+    targetperiod = vsx[0]["Period"]
+    targetrisepercent = vsx[0]["RiseDuration"]
+    targetriseduration = None
+    if targetepoch:
+        targetepoch = Time(2400000.+targetepoch,format="jd",scale="tt")
+    if targetperiod:
+        targetperiod = TimeDelta(targetperiod*u.day)
+    if targetrisepercent:
+        targetriseduration = targetrisepercent/100. * targetperiod
+        targetrisepercent = targetrisepercent * u.percent
     print(f"Target: {targetname} AUID: {targetauid} Epoch: {targetepoch} Period: {targetperiod} Rise Percent: {targetrisepercent} Rise Duration: {targetriseduration}")
     compauids = set()
     for run in tables:
@@ -345,7 +352,9 @@ def lightcurve(tables: [[QTable]], targetname: str) -> None:
     ax1.set_ylabel(f"B [mag]")
     ax2.set_xlabel("JD")
     ax2.set_ylabel(f"V [mag]")
-    ax4.set_xlabel("Phase [T = {targetperiod} d]")
+    ax4.set_xlabel(f"Phase [T = {targetperiod} d]")
+    ax3.set_xlim(0.,1.)
+    ax4.set_xlim(0.,1.)
     fig.savefig(f"Phot-{targetname.replace(' ','_')}.png")
 
 def main():

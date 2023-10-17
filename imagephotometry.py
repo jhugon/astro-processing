@@ -138,7 +138,7 @@ def combine_photometry_vsx_vsp(image,photometry,session,std_field):
     Rout = photometry.meta["ROUT"]
 
     vsp_table = load_vsp(image.header["RA"],image.header["DEC"],std_field,session,filtername=filtername)
-    vsx_table = load_vsx(image.header["RA"],image.header["DEC"],session)
+    vsx_table = load_vsx(image.header["RA"],image.header["DEC"],session=session)
     combined_vsp_table = add_phot_to_vsp_table(photometry,vsp_table)
     combined_vsx_table = None
     if vsx_table:
