@@ -50,12 +50,14 @@ def analyze_variable_star(tablesbyfilter: {str:[QTable]},targetname: str,compaui
         targetriseduration = targetrisepercent/100. * targetperiod
         targetrisepercent = targetrisepercent * u.percent
     print(f"Target: {targetname} AUID: {targetauid} Epoch: {targetepoch} Period: {targetperiod} Rise Percent: {targetrisepercent} Rise Duration: {targetriseduration}")
+    checkauids = set()
     fig, ((ax1,ax3),(ax2,ax4)) = plt.subplots(2,2,figsize=(6,6),constrained_layout=True)#,sharex=True,sharey=True)
     fig.suptitle(f"{targetname}, No Color Calibration")
     for filtername in tablesbyfilter:
         tables = tablesbyfilter[filtername]
         maglist = []
         jdlist = []
+        phaselist = []
         for table in tables:
             jd = table.meta["jd"]
             table.add_index("auid")
@@ -70,13 +72,21 @@ def analyze_variable_star(tablesbyfilter: {str:[QTable]},targetname: str,compaui
             mag = target["measmag"] - comp["measmag"] + comp["catmag"]
             maglist.append(mag)
             jdlist.append(jd)
+            phase = (jd-targetepoch).value % targetperiod.value
+            phaselist.append(phase)
+            for row in table:
+                auid = row["auid"]
+                if row["matchdist"] > 10*u.arcsec or auid == targetauid or auid == compauid or (not row["isvsp"]):
+                    continue
+                checkauids.add(auid)
         mags = u.Quantity(maglist)
         jds = Time(jdlist)
-        breakpoint()
         if filtername == "B":
             ax1.scatter(jds.value,mags.value)
+            ax3.scatter(phaselist,mags.value)
         elif filtername == "V":
             ax2.scatter(jds.value,mags.value)
+            ax4.scatter(phaselist,mags.value)
     ax1.set_ylabel(f"B [mag]")
     ax2.set_xlabel("JD")
     ax2.set_ylabel(f"V [mag]")
@@ -84,6 +94,45 @@ def analyze_variable_star(tablesbyfilter: {str:[QTable]},targetname: str,compaui
     ax3.set_xlim(0.,1.)
     ax4.set_xlim(0.,1.)
     fig.savefig(f"PhotNoColor-{targetname.replace(' ','_')}.png")
+
+    ## Plot things on all check stars
+    checkauids = sorted(checkauids)
+    figcheckvtime, (axcheckvtimeB,axcheckvtimeV) = plt.subplots(2,figsize=(8,8),constrained_layout=True,sharex=True)
+    figcheckvtime.suptitle(f"{targetname} Check Stars, No Color Calibration")
+    for filtername in tablesbyfilter:
+        tables = tablesbyfilter[filtername]
+        checkmagvjd = {auid: [] for auid in checkauids}
+        checkmagerrvjd = {auid: [] for auid in checkauids}
+        compcatmag = float("nan")
+        for table in tables:
+            jd = table.meta["jd"]
+            table.add_index("auid")
+            for iCheck, auid in enumerate(checkauids):
+                check = table.loc[auid]
+                comp = table.loc[compauid]
+                if check["matchdist"] > 10*u.arcsec or comp["matchdist"] > 10*u.arcsec:
+                    continue
+                mag = check["measmag"] - comp["measmag"] + comp["catmag"]
+                magerr = mag-check["catmag"]
+                checkmagvjd[auid].append((jd.value,mag.value))
+                checkmagerrvjd[auid].append((jd.value,magerr.value))
+                compcatmag = comp["catmag"]
+        print(f"Check stars for filter: {filtername}, comp: {compauid}, comp cat: {compcatmag:5.2f}")
+        for key in checkmagvjd:
+            checkmagvjd[key] = np.array(checkmagvjd[key])
+            checkmagerrvjd[key] = np.array(checkmagerrvjd[key])
+        for iCheck, auid in enumerate(checkauids):
+            print(f"AUID: {auid} mean(meas): {np.mean(checkmagvjd[auid][:,1]):5.2f} mag, mean(meas - cat): {np.mean(checkmagerrvjd[auid][:,1]):6.3f} mag, std(meas - cat): {np.std(checkmagerrvjd[auid][:,1]):5.3f} mag")
+            if filtername == "B":
+                axcheckvtimeB.scatter(checkmagvjd[auid][:,0],checkmagerrvjd[auid][:,1],label=auid)
+            elif filtername == "V":
+                axcheckvtimeV.scatter(checkmagvjd[auid][:,0],checkmagerrvjd[auid][:,1],label=auid)
+    axcheckvtimeB.set_ylabel(r"B$_\mathrm{meas}$-B$_\mathrm{cat}$ [mag]")
+    axcheckvtimeV.set_ylabel(r"V$_\mathrm{meas}$-V$_\mathrm{cat}$ [mag]")
+    axcheckvtimeV.set_xlabel("JD")
+    axcheckvtimeB.legend()
+    figcheckvtime.savefig(f"PhotNoColorCheckStarsVTime-{targetname.replace(' ','_')}.png")
+                
         
 
 def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
