@@ -255,7 +255,7 @@ def calibrate(tables: [[QTable]]) -> None:
         for run in tables:
             for obs in run:
                 print(obs)
-                selection = (obs["matchdist"] < 10*u.arcsec) & obs["isvsp"] & (obs["Vcat"] > 11.5*u.mag) & (obs["Bcat"] > 11.5*u.mag)
+                selection = (obs["matchdist"] < 10*u.arcsec) & obs["isvsp"] & (obs["Vcat"] > 11.5*u.mag) & (obs["Vcat"] < 14*u.mag) & (obs["Bcat"] < 14*u.mag)
                 obs = obs[selection]
                 jds = Time(obs.meta["jds"]) # list of Times to Time with list
                 diff = obs[filtername+"meas"]-obs[filtername+"cat"]
@@ -269,7 +269,7 @@ def calibrate(tables: [[QTable]]) -> None:
                 measerrlist.append(obs[filtername+"measerr"])
                 offsetcalibonlydifflist.append(offsetcalibonlydiff)
                 matchdistancelist.append(obs["matchdist"])
-        fig, (ax1,ax2,ax3,ax4,ax5) = plt.subplots(5,figsize=(6,10),constrained_layout=True)
+        fig, (ax1,ax2,ax3,ax4,ax5) = plt.subplots(5,figsize=(8,10),constrained_layout=True)
         yaxis_label = f"{filtername} Cal - Cat [mag]"
         fig.suptitle("Offset Calibration Only--No Color Calibration")
         ax1.scatter(concatlistvalues(instcolorlist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
