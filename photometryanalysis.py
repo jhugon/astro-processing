@@ -42,12 +42,13 @@ def get_vsp_vsx_tables(fn):
 
 def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
     result = vsp.copy()
-    names = ("auid","measmag","catmag","catmagerr","matchdist","isvsp")
+    names = ("auid","measmag","catmag","catmagerr","matchdist","rawpeak","isvsp")
     auids = []
     measmags = []
     catmags = []
     catmagerrs = []
     matchdists = []
+    rawpeaks = []
     isvsps = []
     for row in vsp:
         auids.append(row["auid"])
@@ -55,6 +56,7 @@ def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
         catmags.append(row[filtername])
         catmagerrs.append(row[filtername+"error"])
         matchdists.append(row["Match Distance"])
+        rawpeaks.append(row["Raw Peak"]*u.adu)
         isvsps.append(True)
     if vsx:
         vsx_good_auids = vsx[np.logical_not(vsx["AUID"].mask)]
@@ -64,9 +66,10 @@ def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
             catmags.append(float('nan')*u.mag)
             catmagerrs.append(float('nan')*u.mag)
             matchdists.append(row["Match Distance"])
+            rawpeaks.append(row["Raw Peak"]*u.adu)
             isvsps.append(False)
-    meta = {"std_field":vsp.meta["std_field"],"filter":filtername}
-    result = QTable((auids,measmags,catmags,catmagerrs,matchdists,isvsps),names=names,meta=meta)
+    meta = {"std_field":vsp.meta["std_field"],"filter":filtername,"target":vsp.meta["TARGET"]}
+    result = QTable((auids,measmags,catmags,catmagerrs,matchdists,rawpeaks,isvsps),names=names,meta=meta)
     return result
 
 def seperate_runs(fns: [Path]) -> [[Path]]:
@@ -130,11 +133,14 @@ def average_vsp_tables(fns,filtername):
     catMagErr = {}
     matchDistance = {}
     measMag = {}
+    rawpeak = {}
     isVSP = {}
     jds = []
+    targets = set()
     for fn in fns:
         vsp, vsx = get_vsp_vsx_tables(fn)
         table = combine_vsp_vsx_tables(vsp,vsx,filtername)
+        targets.add(table.meta["target"])
         jds.append(get_image_jd_filter(fn)[0])
         for row in table:
             auid = row["auid"]
@@ -146,10 +152,14 @@ def average_vsp_tables(fns,filtername):
             except KeyError:
                 matchDistance[auid] = row["matchdist"]
                 measMag[auid] = [row["measmag"]]
+                rawpeak[auid] = [row["rawpeak"]]
             else:
                 measMag[auid].append(row["measmag"])
+                rawpeak[auid].append(row["rawpeak"])
+    assert(len(targets)==1)
     avgMag = {key:u.Quantity(measMag[key]).mean() for key in measMag}
     stdMag = {key:u.Quantity(measMag[key]).std()/np.sqrt(len(measMag[key])) for key in measMag}
+    avgrawpeak = {key:u.Quantity(rawpeak[key]).mean() for key in rawpeak}
     auids = sorted(catMag.keys())
     result = QTable(
         [
@@ -159,10 +169,11 @@ def average_vsp_tables(fns,filtername):
             [catMag[auid] for auid in auids],
             [catMagErr[auid] for auid in auids],
             [matchDistance[auid] for auid in auids],
+            [avgrawpeak[auid] for auid in auids],
             [isVSP[auid] for auid in auids],
         ],
-        names = ("auid","measmag","measmagerr","catmag","catmagerr","matchdist","isvsp"),
-        meta = {"filter":filtername,"jds":jds}
+        names = ("auid","measmag","measmagerr","catmag","catmagerr","matchdist","rawpeak","isvsp"),
+        meta = {"filter":filtername,"jds":jds,"target":targets.pop()}
     )
     return result
 
@@ -214,19 +225,23 @@ def combine_filters(tables: [Table]) -> Table:
         table.add_index("auid")
         newjds += table.meta["jds"]
     newrows = []
+    targets = set()
     for auid in auids:
         newrow = {"auid": auid,"matchdist":-20.*u.arcsec}
         for table in tables:
             filtername = table.meta["filter"]
+            targets.add(table.meta["target"])
             row = table.loc[auid]
             newrow["matchdist"] = max(newrow["matchdist"],row["matchdist"])
             newrow[filtername+"meas"] = row["measmag"]
             newrow[filtername+"measerr"] = row["measmagerr"]
             newrow[filtername+"cat"] = row["catmag"]
             newrow[filtername+"caterr"] = row["catmagerr"]
+            newrow[filtername+"rawpeak"] = row["rawpeak"]
             newrow["isvsp"] = row["isvsp"]
         newrows.append(newrow)
-    result = QTable(rows=newrows,meta={"jds":newjds})
+    assert(len(targets)==1)
+    result = QTable(rows=newrows,meta={"jds":newjds,"target":targets.pop()})
     return result
 
 def load_group_by_runs_filters(fns: [Path]) -> [[QTable]]:
@@ -255,7 +270,8 @@ def calibrate(tables: [[QTable]]) -> None:
         for run in tables:
             for obs in run:
                 print(obs)
-                selection = (obs["matchdist"] < 10*u.arcsec) & obs["isvsp"] & (obs["Vcat"] > 11.5*u.mag) & (obs["Vcat"] < 14*u.mag) & (obs["Bcat"] < 14*u.mag)
+                #selection = (obs["matchdist"] < 10*u.arcsec) & obs["isvsp"] & (obs["Vcat"] > 11.5*u.mag) & (obs["Vcat"] < 14*u.mag) & (obs["Bcat"] < 14*u.mag)
+                selection = (obs["matchdist"] < 10*u.arcsec) & obs["isvsp"]
                 obs = obs[selection]
                 jds = Time(obs.meta["jds"]) # list of Times to Time with list
                 diff = obs[filtername+"meas"]-obs[filtername+"cat"]

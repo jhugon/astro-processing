@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 from pathlib import Path
 import re
 import xml.etree.ElementTree as XMLElementTree
@@ -24,7 +25,7 @@ from astroquery.vizier import Vizier
 
 from imageanalysisplatesolve import findfilesindir, checkiffileneedsupdate
 
-def parse_target(fn: Path):
+def parse_target(fn: Path) -> str:
     m = re.match(r"calibrated-([tT]\d+)-\w+-(\w+)-\d+-\d+-(\w+)-BIN\d+-\w-\d+-\d+.fit",fn.name)
     if m:
         return m.group(2)
@@ -117,7 +118,7 @@ def add_phot_to_vsp_table(phot,vsp):
     result = vsp.copy()
     del result["skypos"]
     result["Match Distance"] = d2d.to(u.arcsec)
-    for colname in ["Instrumental Magnitude","Flux","Background Flux","ra","dec","x","y"]:
+    for colname in ["Instrumental Magnitude","Flux","Background Flux","ra","dec","x","y","Raw Peak"]:
         result[colname] = phot[colname][idx]
     return result
 
@@ -125,7 +126,7 @@ def add_phot_to_vsx_table(phot,vsx):
     idx, d2d, _ = vsx["skypos"].match_to_catalog_sky(phot["skypos"])
     result = vsx["AUID","Name"].copy()
     result["Match Distance"] = d2d.to(u.arcsec)
-    for colname in ["Instrumental Magnitude","Flux","Background Flux","ra","dec","x","y"]:
+    for colname in ["Instrumental Magnitude","Flux","Background Flux","ra","dec","x","y","Raw Peak"]:
         result[colname] = phot[colname][idx]
     return result
 
@@ -167,18 +168,46 @@ def combine_photometry_vsx_vsp(image,photometry,session,std_field):
 
     return combined_vsx_table, combined_vsp_table
 
+def find_rawfile(fn: Path,rawdirs:[Path]) -> Path:
+    fnglob = fn.name+"*"
+    fnglob = fnglob.replace("calibrated-","raw-")
+    globs = []
+    for rawdir in rawdirs:
+        rawdir = rawdir.absolute()
+        for glob in rawdir.rglob(fnglob):
+            globs.append(glob)
+    if len(globs) < 1:
+        raise FileNotFoundError(f"{fnglob} in rawdirs: {[str(x) for x in rawdirs]}")
+    return globs[0]
 
-def analyze(fn,outdir,session):
+def analyze(fn,outdir,rawdirs,session):
     print(f"Analyzing {fn} ...")
     outfile = ( outdir / fn.stem ).with_suffix( ".fit")
-    if not checkiffileneedsupdate([fn],outfile):
+    rawfn = None
+    try:
+        rawfn = find_rawfile(fn,rawdirs)
+    except FileNotFoundError as e:
+        print(f"Raw file not found: {e}\nSkipping.",file=sys.stderr)
+        return
+    if not checkiffileneedsupdate([fn,rawfn],outfile):
         print(f"No update needed for output file {outfile}")
         return
     target = parse_target(fn)
     std_field = bool(re.match(r"SA\d+(_\w+)?|GD\d+(_\w+)?|F\d+",target))
     print(f"Target: {target}",f"std_field: {std_field}")
-    with fits.open(fn) as hdul:
+    try:
+        fits.open(fn)
+    except OSError as e:
+        print(f"Error opening calibrated file: {fn}, OSError: {e}\nSkipping",file=sys.stderr)
+        return
+    try:
+        fits.open(rawfn)
+    except OSError as e:
+        print(f"Error opening raw file: {rawfn}, OSError: {e}\nSkipping calibrated file",file=sys.stderr)
+        return
+    with fits.open(fn) as hdul, fits.open(rawfn) as rawhdul:
         image = hdul[0]
+        rawimage = rawhdul[0]
         fwhmpx = image.header['FWHMPX']
         bkmean = image.header["BKMEAN"]
         bkstd = image.header["BKSTD"]
@@ -204,13 +233,18 @@ def analyze(fn,outdir,session):
         flux_bkg = bkgstats.mean * aperstats.sum_aper_area.value
         flux_bkg_sub = flux-flux_bkg
         instmag = -2.5 * np.log10(flux_bkg_sub/exposure)
+
+        rawaperstats = ApertureStats(rawimage.data, apertures, sigma_clip=None)
         
-        phottable = QTable([instmag,flux_bkg_sub,flux,flux_bkg,sources["xcentroid"],sources["ycentroid"],skypositions.ra.to_string("deg"),skypositions.dec.to_string("deg")],
-                            names=("Instrumental Magnitude","Flux - Background", "Flux", "Background Flux","x","y","ra","dec"),
+        phottable = QTable([instmag,flux_bkg_sub,flux,flux_bkg,sources["xcentroid"],sources["ycentroid"],skypositions.ra.to_string("deg"),skypositions.dec.to_string("deg"),rawaperstats.max],
+                            names=("Instrumental Magnitude","Flux - Background", "Flux", "Background Flux","x","y","ra","dec","Raw Peak"),
                             meta={"name": "PHOTTABLE","R":aperture_R,"RIN": annulus_Rin, "ROUT": annulus_Rout}
                         )
 
         vsx_table, vsp_table = combine_photometry_vsx_vsp(image,phottable,session,std_field)
+        if vsx_table:
+            vsx_table.meta["target"] = target
+        vsp_table.meta["target"] = target
 
         # Output file
 
@@ -247,11 +281,13 @@ def main():
         description="Creates new copies of images with fits headers including WCS, FWHM, background, noise, and S/N. Standard WCS fits headers are added as well as BKMEAN, BKMEDIAN, and BKSTD, which are the 3-sigma-clipped mean, median, and standard-deviation of the image."
     )
     parser.add_argument("indir",type=Path,nargs="+",help="Input directories to search for *.fit and *.fit.zip files.")
+    parser.add_argument("-r","--rawdir",type=Path,nargs="+",help="Input directories to search for raw versions of the indir filenames.")
     parser.add_argument("outdir",type=Path,help="Directory where output files will be written.")
 
     args = parser.parse_args()
 
     indirs = args.indir
+    rawdirs = args.rawdir
     outdir = args.outdir
 
     for indir in indirs:
@@ -259,6 +295,11 @@ def main():
             raise Exception(f"{indir} doesn't exist")
         if not indir.is_dir():
             raise Exception(f"{indir} isn't a directory")
+    for rawdir in rawdirs:
+        if not rawdir.exists():
+            raise Exception(f"{rawdir} doesn't exist")
+        if not rawdir.is_dir():
+            raise Exception(f"{rawdir} isn't a directory")
     if not outdir.exists():
         outdir.mkdir(parents=True)
     if not outdir.is_dir():
@@ -270,7 +311,7 @@ def main():
 
     session = requests_cache.CachedSession()
     for infile in infiles:
-        analyze(infile,outdir,session)
+        analyze(infile,outdir,rawdirs,session)
         
 
 if __name__ == "__main__":
