@@ -267,6 +267,7 @@ def calibrate(tables: [[QTable]]) -> None:
         offsetcalibonlydifflist = []
         matchdistancelist = []
         measerrlist = []
+        rawpeaklist = []
         for run in tables:
             for obs in run:
                 print(obs)
@@ -285,7 +286,8 @@ def calibrate(tables: [[QTable]]) -> None:
                 measerrlist.append(obs[filtername+"measerr"])
                 offsetcalibonlydifflist.append(offsetcalibonlydiff)
                 matchdistancelist.append(obs["matchdist"])
-        fig, (ax1,ax2,ax3,ax4,ax5) = plt.subplots(5,figsize=(8,10),constrained_layout=True)
+                rawpeaklist.append(obs[filtername+"rawpeak"])
+        fig, (ax1,ax2,ax3,ax4,ax5,ax6) = plt.subplots(6,figsize=(8,10),constrained_layout=True)
         yaxis_label = f"{filtername} Cal - Cat [mag]"
         fig.suptitle("Offset Calibration Only--No Color Calibration")
         ax1.scatter(concatlistvalues(instcolorlist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
@@ -310,7 +312,26 @@ def calibrate(tables: [[QTable]]) -> None:
         ax5.set_ylabel(yaxis_label)
         ax5.set_xscale("log")
         ax5.grid(True)
+        ax6.scatter(concatlistvalues(rawpeaklist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax6.set_xlabel("Peak Value [ADU]")
+        ax6.set_ylabel(yaxis_label)
+        ax6.grid(True)
         fig.savefig(f"CalibOffsetOnly_{filtername}.png")
+        
+        fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
+        fig.suptitle("Offset Calibration Only--No Color Calibration")
+        ax1.scatter(concatlistvalues(rawpeaklist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax1.set_xlabel("Peak Value [ADU]")
+        ax1.set_ylabel(yaxis_label)
+        ax1.grid(True)
+        ax2.scatter(concatlistvalues(rawpeaklist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax2.set_xlabel("Peak Value [ADU]")
+        ax2.set_ylabel(yaxis_label)
+        ax2.grid(True)
+        ax1.set_xlim(None,10000)
+        ax2.set_xlim(60000,None)
+        fig.savefig(f"CalibOffsetOnlyMeasErrVRawPeak_{filtername}.png")
+        
 
 def lightcurve(tables: [[QTable]], targetname: str) -> None:
     session = requests_cache.CachedSession()
