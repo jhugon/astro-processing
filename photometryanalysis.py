@@ -257,62 +257,53 @@ def load_group_by_runs_filters(fns: [Path]) -> [[QTable]]:
     return result
 
 def calibrate(tables: [[QTable]]) -> None:
-    def concatlistvalues(l):
-        return np.concatenate([x.value for x in l])
     markersize = 2 ** 2 # default is 6 ** 2
-    for filtername in ["B","V"]:
-        instcolorlist = []
-        catcolorlist = []
-        catmaglist = []
-        offsetcalibonlydifflist = []
-        matchdistancelist = []
-        measerrlist = []
-        rawpeaklist = []
-        for run in tables:
-            for obs in run:
-                print(obs)
-                #selection = (obs["matchdist"] < 10*u.arcsec) & obs["isvsp"] & (obs["Vcat"] > 11.5*u.mag) & (obs["Vcat"] < 14*u.mag) & (obs["Bcat"] < 14*u.mag)
-                selection = (obs["matchdist"] < 10*u.arcsec) & obs["isvsp"]
-                obs = obs[selection]
-                jds = Time(obs.meta["jds"]) # list of Times to Time with list
+
+    newtables = []
+    for run in tables:
+        for obs in run:
+            obs["target"] = obs.meta["target"]
+            jds = Time(obs.meta["jds"]) # list of Times to Time with list
+            obs["jd"] = jds.mean()
+            for filtername in ["B","V"]:
                 diff = obs[filtername+"meas"]-obs[filtername+"cat"]
-                instcolor = obs["Bmeas"]-obs["Vmeas"]
-                catcolor = obs["Bcat"]-obs["Vcat"]
                 offsetcalibonly = obs[filtername+"meas"]-diff.mean()
-                offsetcalibonlydiff = offsetcalibonly-obs[filtername+"cat"]
-                instcolorlist.append(instcolor)
-                catcolorlist.append(catcolor)
-                catmaglist.append(obs[filtername+"cat"])
-                measerrlist.append(obs[filtername+"measerr"])
-                offsetcalibonlydifflist.append(offsetcalibonlydiff)
-                matchdistancelist.append(obs["matchdist"])
-                rawpeaklist.append(obs[filtername+"rawpeak"])
+                obs[filtername+"calib"] = offsetcalibonly
+            newtables.append(obs)
+    alltable = astropy.table.vstack(newtables)
+
+    #selection = (alltable["matchdist"] < 10*u.arcsec) & alltable["isvsp"] & (alltable["Vcat"] > 11.5*u.mag) & (alltable["Vcat"] < 14*u.mag) & (alltable["Bcat"] < 14*u.mag)
+    selection = (alltable["matchdist"] < 10*u.arcsec) & alltable["isvsp"]
+    alltable = alltable[selection]
+
+    for filtername in ["B","V"]:
+        calibdiffs = alltable[filtername+"calib"]-alltable[filtername+"cat"]
         fig, (ax1,ax2,ax3,ax4,ax5,ax6) = plt.subplots(6,figsize=(8,10),constrained_layout=True)
         yaxis_label = f"{filtername} Cal - Cat [mag]"
         fig.suptitle("Offset Calibration Only--No Color Calibration")
-        ax1.scatter(concatlistvalues(instcolorlist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax1.scatter(alltable["Bmeas"]-alltable["Vmeas"],calibdiffs,s=markersize)
         ax1.set_xlabel("Instrumental B-V [mag]")
         ax1.set_ylabel(yaxis_label)
         ax1.grid(True)
-        ax2.scatter(concatlistvalues(catcolorlist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax2.scatter(alltable["Bcat"]-alltable["Vcat"],calibdiffs,s=markersize)
         ax2.set_xlabel("Catalog B-V [mag]")
         ax2.set_ylabel(yaxis_label)
         ax2.grid(True)
-        ax3.scatter(concatlistvalues(catmaglist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax3.scatter(alltable[filtername+"cat"],calibdiffs,s=markersize)
         ax3.set_xlabel(f"Catalog {filtername} [mag]")
         ax3.set_ylabel(yaxis_label)
         ax3.grid(True)
-        ax4.scatter(concatlistvalues(measerrlist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax4.scatter(alltable[filtername+"measerr"],calibdiffs,s=markersize)
         ax4.set_xlabel(f"Estimated Measured {filtername} Uncertainty [mag]")
         ax4.set_ylabel(yaxis_label)
         ax4.set_xscale("log")
         ax4.grid(True)
-        ax5.scatter(concatlistvalues(matchdistancelist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax5.scatter(alltable["matchdist"],calibdiffs,s=markersize)
         ax5.set_xlabel("Match Distance [arcsec]")
         ax5.set_ylabel(yaxis_label)
         ax5.set_xscale("log")
         ax5.grid(True)
-        ax6.scatter(concatlistvalues(rawpeaklist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax6.scatter(alltable[filtername+"rawpeak"],calibdiffs,s=markersize)
         ax6.set_xlabel("Peak Value [ADU]")
         ax6.set_ylabel(yaxis_label)
         ax6.grid(True)
@@ -320,11 +311,11 @@ def calibrate(tables: [[QTable]]) -> None:
         
         fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
         fig.suptitle("Offset Calibration Only--No Color Calibration")
-        ax1.scatter(concatlistvalues(rawpeaklist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax1.scatter(alltable[filtername+"rawpeak"],calibdiffs,s=markersize)
         ax1.set_xlabel("Peak Value [ADU]")
         ax1.set_ylabel(yaxis_label)
         ax1.grid(True)
-        ax2.scatter(concatlistvalues(rawpeaklist),concatlistvalues(offsetcalibonlydifflist),s=markersize)
+        ax2.scatter(alltable[filtername+"rawpeak"],calibdiffs,s=markersize)
         ax2.set_xlabel("Peak Value [ADU]")
         ax2.set_ylabel(yaxis_label)
         ax2.grid(True)
