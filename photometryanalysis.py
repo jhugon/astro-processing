@@ -259,22 +259,24 @@ def load_group_by_runs_filters(fns: [Path]) -> [[QTable]]:
 def calibrate(tables: [[QTable]]) -> None:
     markersize = 2 ** 2 # default is 6 ** 2
 
+    selectorforoffset = lambda table: (table["matchdist"] < 10*u.arcsec) & table["isvsp"]
+    selectorforplots = selectorforoffset
+    #selectorforplots = lambda table: selectorforoffset(table) & (table["Vcat"] > 11.5*u.mag) & (table["Vcat"] < 14*u.mag) & (table["Bcat"] < 14*u.mag)
+
     newtables = []
     for run in tables:
         for obs in run:
             obs["target"] = obs.meta["target"]
             jds = Time(obs.meta["jds"]) # list of Times to Time with list
             obs["jd"] = jds.mean()
+            obsforoffset = obs[selectorforoffset(obs)]
             for filtername in ["B","V"]:
-                diff = obs[filtername+"meas"]-obs[filtername+"cat"]
-                offsetcalibonly = obs[filtername+"meas"]-diff.mean()
-                obs[filtername+"calib"] = offsetcalibonly
+                offset = (obsforoffset[filtername+"meas"]-obsforoffset[filtername+"cat"]).mean()
+                obs[filtername+"calib"] = obs[filtername+"meas"]-offset
             newtables.append(obs)
-    alltable = astropy.table.vstack(newtables)
 
-    #selection = (alltable["matchdist"] < 10*u.arcsec) & alltable["isvsp"] & (alltable["Vcat"] > 11.5*u.mag) & (alltable["Vcat"] < 14*u.mag) & (alltable["Bcat"] < 14*u.mag)
-    selection = (alltable["matchdist"] < 10*u.arcsec) & alltable["isvsp"]
-    alltable = alltable[selection]
+    alltable = astropy.table.vstack(newtables,metadata_conflicts="silent")
+    alltable = alltable[selectorforplots(alltable)]
 
     for filtername in ["B","V"]:
         calibdiffs = alltable[filtername+"calib"]-alltable[filtername+"cat"]
