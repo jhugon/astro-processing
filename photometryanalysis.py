@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+from dataclasses import dataclass, asdict
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -259,72 +260,128 @@ def load_group_by_runs_filters(fns: [Path]) -> [[QTable]]:
 def calibrate(tables: [[QTable]]) -> None:
     markersize = 2 ** 2 # default is 6 ** 2
 
-    selectorforoffset = lambda table: (table["matchdist"] < 10*u.arcsec) & table["isvsp"]
+    rawpeakmin = 3200*u.adu
+    rawpeakmax = 64000*u.adu
+    selectorforoffset = lambda table: (table["matchdist"] < 10*u.arcsec) & table["isvsp"] \
+                                        & (table["Vrawpeak"] > rawpeakmin) & (table["Vrawpeak"] < rawpeakmax) \
+                                        & (table["Brawpeak"] > rawpeakmin) & (table["Brawpeak"] < rawpeakmax)
     selectorforplots = selectorforoffset
     #selectorforplots = lambda table: selectorforoffset(table) & (table["Vcat"] > 11.5*u.mag) & (table["Vcat"] < 14*u.mag) & (table["Bcat"] < 14*u.mag)
 
+    @dataclass
+    class ObsData:
+        N: int
+        target: str
+        jdmean: u.adu
+        Vssr: u.mag**2
+        Bssr: u.mag**2
+        Voffset: u.mag
+        Boffset: u.mag
+
     newtables = []
+    obsdatas = []
     for run in tables:
         for obs in run:
             obs["target"] = obs.meta["target"]
             jds = Time(obs.meta["jds"]) # list of Times to Time with list
             obs["jd"] = jds.mean()
             obsforoffset = obs[selectorforoffset(obs)]
+            offsets = {}
             for filtername in ["B","V"]:
                 offset = (obsforoffset[filtername+"meas"]-obsforoffset[filtername+"cat"]).mean()
                 obs[filtername+"calib"] = obs[filtername+"meas"]-offset
+                offsets[filtername] = offset
             newtables.append(obs)
+            obsforplots = obs[selectorforplots(obs)]
+            obsdata = ObsData(len(obs),obs.meta["target"],jds.mean(),
+                            ((obsforplots["Vcalib"]-obsforplots["Vcat"])**2).mean(),
+                            ((obsforplots["Bcalib"]-obsforplots["Bcat"])**2).mean(),
+                            offsets["V"],offsets["B"])
+            obsdatas.append(obsdata)
+    obssummarytable = QTable([asdict(x) for x in obsdatas])
 
     alltable = astropy.table.vstack(newtables,metadata_conflicts="silent")
-    alltable = alltable[selectorforplots(alltable)]
+    tableselplots = alltable[selectorforplots(alltable)]
 
     for filtername in ["B","V"]:
-        calibdiffs = alltable[filtername+"calib"]-alltable[filtername+"cat"]
+        calibdiffs = tableselplots[filtername+"calib"]-tableselplots[filtername+"cat"]
         fig, (ax1,ax2,ax3,ax4,ax5,ax6) = plt.subplots(6,figsize=(8,10),constrained_layout=True)
         yaxis_label = f"{filtername} Cal - Cat [mag]"
         fig.suptitle("Offset Calibration Only--No Color Calibration")
-        ax1.scatter(alltable["Bmeas"]-alltable["Vmeas"],calibdiffs,s=markersize)
+        ax1.scatter(tableselplots["Bmeas"]-tableselplots["Vmeas"],calibdiffs,s=markersize)
         ax1.set_xlabel("Instrumental B-V [mag]")
         ax1.set_ylabel(yaxis_label)
         ax1.grid(True)
-        ax2.scatter(alltable["Bcat"]-alltable["Vcat"],calibdiffs,s=markersize)
+        ax2.scatter(tableselplots["Bcat"]-tableselplots["Vcat"],calibdiffs,s=markersize)
         ax2.set_xlabel("Catalog B-V [mag]")
         ax2.set_ylabel(yaxis_label)
         ax2.grid(True)
-        ax3.scatter(alltable[filtername+"cat"],calibdiffs,s=markersize)
+        ax3.scatter(tableselplots[filtername+"cat"],calibdiffs,s=markersize)
         ax3.set_xlabel(f"Catalog {filtername} [mag]")
         ax3.set_ylabel(yaxis_label)
         ax3.grid(True)
-        ax4.scatter(alltable[filtername+"measerr"],calibdiffs,s=markersize)
+        ax4.scatter(tableselplots[filtername+"measerr"],calibdiffs,s=markersize)
         ax4.set_xlabel(f"Estimated Measured {filtername} Uncertainty [mag]")
         ax4.set_ylabel(yaxis_label)
         ax4.set_xscale("log")
         ax4.grid(True)
-        ax5.scatter(alltable["matchdist"],calibdiffs,s=markersize)
+        ax5.scatter(tableselplots["matchdist"],calibdiffs,s=markersize)
         ax5.set_xlabel("Match Distance [arcsec]")
         ax5.set_ylabel(yaxis_label)
         ax5.set_xscale("log")
         ax5.grid(True)
-        ax6.scatter(alltable[filtername+"rawpeak"],calibdiffs,s=markersize)
-        ax6.set_xlabel("Peak Value [ADU]")
+        ax6.scatter(tableselplots[filtername+"rawpeak"],calibdiffs,s=markersize)
+        ax6.set_xlabel("Raw Peak Value [ADU]")
         ax6.set_ylabel(yaxis_label)
         ax6.grid(True)
         fig.savefig(f"CalibOffsetOnly_{filtername}.png")
         
         fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
         fig.suptitle("Offset Calibration Only--No Color Calibration")
-        ax1.scatter(alltable[filtername+"rawpeak"],calibdiffs,s=markersize)
-        ax1.set_xlabel("Peak Value [ADU]")
+        ax1.scatter(tableselplots[filtername+"rawpeak"],calibdiffs,s=markersize)
+        ax1.set_xlabel("Raw Peak Value [ADU]")
         ax1.set_ylabel(yaxis_label)
         ax1.grid(True)
-        ax2.scatter(alltable[filtername+"rawpeak"],calibdiffs,s=markersize)
-        ax2.set_xlabel("Peak Value [ADU]")
+        ax2.scatter(tableselplots[filtername+"rawpeak"],calibdiffs,s=markersize)
+        ax2.set_xlabel("Raw Peak Value [ADU]")
         ax2.set_ylabel(yaxis_label)
         ax2.grid(True)
         ax1.set_xlim(None,10000)
         ax2.set_xlim(60000,None)
         fig.savefig(f"CalibOffsetOnlyMeasErrVRawPeak_{filtername}.png")
-        
+
+    rawvcatmagtable = alltable[(alltable["matchdist"] < 10*u.arcsec) & alltable["isvsp"]]
+    fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
+    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    ax1.scatter(rawvcatmagtable["Vcat"],rawvcatmagtable["Vrawpeak"],s=markersize)
+    ax1.set_xlabel("Catalog V [mag]")
+    ax1.set_ylabel("V Peak Value [ADU]")
+    ax1.grid(True)
+    ax1.set_yscale("log")
+    ax1.axhline(rawpeakmin.value,c='r')
+    ax1.axhline(rawpeakmax.value,c='r')
+    ax2.scatter(rawvcatmagtable["Bcat"],rawvcatmagtable["Brawpeak"],s=markersize)
+    ax2.set_xlabel("Catalog B [mag]")
+    ax2.set_ylabel("B Peak Value [ADU]")
+    ax2.grid(True)
+    ax2.set_yscale("log")
+    ax2.axhline(rawpeakmin.value,c='r')
+    ax2.axhline(rawpeakmax.value,c='r')
+    fig.savefig(f"CalibOffsetOnlyRawVCatMag.png")
+
+    fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
+    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    ax1.scatter(obssummarytable["jdmean"].value,obssummarytable["Vssr"],label="V",c="g")
+    ax1.scatter(obssummarytable["jdmean"].value,obssummarytable["Bssr"],label="B",c="b")
+    ax1.set_xlabel("JD")
+    ax1.set_ylabel(r"Sum Squared Residuals [mag$^2$]")
+    ax1.grid(True)
+    ax2.scatter(obssummarytable["jdmean"].value,obssummarytable["Voffset"],label="V",c="g")
+    ax2.scatter(obssummarytable["jdmean"].value,obssummarytable["Boffset"],label="B",c="b")
+    ax2.set_xlabel("JD")
+    ax2.set_ylabel(r"Calibration Offset [mag]")
+    ax2.grid(True)
+    fig.savefig(f"CalibOffsetOnlySummary.png")
 
 def lightcurve(tables: [[QTable]], targetname: str) -> None:
     session = requests_cache.CachedSession()
