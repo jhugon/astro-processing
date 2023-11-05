@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from dataclasses import dataclass, asdict
 from pathlib import Path
 import sys
 
@@ -15,15 +16,18 @@ from astropy.table import Table, QTable
 from astropy.time import Time, TimeDelta
 
 from imagephotometry import load_vsx
-from photometryanalysis import get_vsp_vsx_tables, combine_vsp_vsx_tables, get_image_jd_filter
+from photometryanalysis import get_vsp_vsx_tables, combine_vsp_vsx_tables, get_image_jd_filter, get_altaz_siderealtime
 
 def load_files_by_filter(fns: [Path]) -> {str:[QTable]}:
     tables = {}
     for fn in fns:
         jd, filtername = get_image_jd_filter(fn)
+        altaz, sidereal = get_altaz_siderealtime(fn)
         vsp, vsx = get_vsp_vsx_tables(fn)
         table = combine_vsp_vsx_tables(vsp,vsx,filtername)
         table.meta["jd"] = jd
+        table.meta["altaz"] = altaz
+        table.meta["sidereal"] = sidereal
         try:
             tables[filtername].append(table)
         except KeyError:
@@ -133,22 +137,103 @@ def analyze_variable_star(tablesbyfilter: {str:[QTable]},targetname: str,compaui
     axcheckvtimeB.legend()
     figcheckvtime.savefig(f"PhotNoColorCheckStarsVTime-{targetname.replace(' ','_')}.png")
                 
-        
+
+@dataclass
+class ObsSummaryData:
+    N: int
+    target: str
+    filtername: str
+    jd: Time
+    sidereal: Time
+    alt: float
+    ssr: u.mag**2
+    zeropoint: u.mag
 
 def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
-    for filtername in tablesbyfilter:
-        tables = tablesbyfilter[filtername]
-        measmaglist = []
-        catmaglist = []
-        matchdistancelist = []
-        measerrlist = []
-        for table in tables:
-            obs = table[(table["matchdist"] < 10*u.arcsec) & table["isvsp"]]
-            breakpoint()
-            jd = obs.meta["jd"]
-            diff = obs["measmag"]-obs["catmag"]
-            meas = obs["measmag"]-diff.mean()
 
+    markersize = 4**2 # default is 6**2
+    rawpeakmin = 3200*u.adu
+    rawpeakmax = 64000*u.adu
+    selector = lambda table: (table["matchdist"] < 10*u.arcsec) & table["isvsp"] \
+                                        & (table["rawpeak"] > rawpeakmin) & (table["rawpeak"] < rawpeakmax)
+
+    obssummaries = []
+    for filtername in tablesbyfilter:
+        for table in tablesbyfilter[filtername]:
+            obs = table[selector(table)]
+            N = len(obs)
+            target = obs.meta["target"]
+            jd = obs.meta["jd"]
+            sidereal = obs.meta["sidereal"]
+            alt = obs.meta["altaz"].alt.value
+            instdiff = obs["measmag"]-obs["catmag"]
+            zeropoint = instdiff.mean()
+            residuals = obs["measmag"] - zeropoint - obs["catmag"]
+            ssr = (residuals**2).sum()
+            osd = ObsSummaryData(N,target,filtername,jd,sidereal,alt,ssr,zeropoint)
+            obssummaries.append(osd)
+    obssummarytable = QTable([asdict(x) for x in obssummaries])
+    obssummarytableV = obssummarytable[obssummarytable["filtername"]=="V"]
+    obssummarytableB = obssummarytable[obssummarytable["filtername"]=="B"]
+
+    fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
+    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    ax1.scatter(obssummarytableB["jd"].value,obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
+    ax1.scatter(obssummarytableV["jd"].value,obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
+    ax1.set_xlabel("JD")
+    ax1.set_ylabel(r"Photometry Sum Squared Residuals / (N-1) [mag$^2$]")
+    ax1.set_yscale("log")
+    ax1.grid(True)
+    ax1.legend()
+    ax2.scatter(obssummarytableB["jd"].value,obssummarytableB["zeropoint"],label="B",c="b",s=markersize)
+    ax2.scatter(obssummarytableV["jd"].value,obssummarytableV["zeropoint"],label="V",c="g",s=markersize)
+    ax2.set_xlabel("JD")
+    ax2.set_ylabel(r"Zeropoint [mag]")
+    ax2.grid(True)
+    fig.savefig(f"CalibNoColorSummary_JD.png")
+
+    fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
+    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    ax1.scatter(obssummarytableB["alt"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
+    ax1.scatter(obssummarytableV["alt"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
+    ax1.set_xlabel("Image Center Altitude [deg]")
+    ax1.set_ylabel(r"Photometry Sum Squared Residuals / (N-1) [mag$^2$]")
+    ax1.set_yscale("log")
+    ax1.grid(True)
+    ax1.legend()
+    ax2.scatter(obssummarytableB["alt"],obssummarytableB["zeropoint"],label="B",c="b",s=markersize)
+    ax2.scatter(obssummarytableV["alt"],obssummarytableV["zeropoint"],label="V",c="g",s=markersize)
+    ax1.set_xlabel("Image Center Altitude [deg]")
+    ax2.set_ylabel(r"Zeropoint [mag]")
+    ax2.grid(True)
+    fig.savefig(f"CalibNoColorSummary_Alt.png")
+
+    fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
+    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    ax1.scatter(obssummarytableB["sidereal"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
+    ax1.scatter(obssummarytableV["sidereal"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
+    ax1.set_xlabel("Local Sidereal Time [hourangle]")
+    ax1.set_ylabel(r"Photometry Sum Squared Residuals / (N-1) [mag$^2$]")
+    ax1.set_yscale("log")
+    ax1.grid(True)
+    ax1.legend()
+    ax2.scatter(obssummarytableB["sidereal"].value,obssummarytableB["zeropoint"],label="B",c="b",s=markersize)
+    ax2.scatter(obssummarytableV["sidereal"].value,obssummarytableV["zeropoint"],label="V",c="g",s=markersize)
+    ax2.set_xlabel("Local Sidereal Time [hourangle]")
+    ax2.set_ylabel(r"Zeropoint [mag]")
+    ax2.grid(True)
+    fig.savefig(f"CalibNoColorSummary_Sidereal.png")
+
+    fig, ax1 = plt.subplots(figsize=(8,10),constrained_layout=True)
+    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    ax1.scatter(obssummarytableB["zeropoint"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
+    ax1.scatter(obssummarytableV["zeropoint"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
+    ax1.set_xlabel(r"Zeropoint [mag]")
+    ax1.set_ylabel(r"Photometry Sum Squared Residuals / (N-1) [mag$^2$]")
+    ax1.set_yscale("log")
+    ax1.grid(True)
+    ax1.legend()
+    fig.savefig(f"CalibNoColorSummary_ssrVZeropoint.png")
 
 
 def main():

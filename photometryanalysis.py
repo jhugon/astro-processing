@@ -13,6 +13,7 @@ from astropy.stats import sigma_clipped_stats, SigmaClip
 import astropy.table
 from astropy.table import Table, QTable
 from astropy.time import Time, TimeDelta
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 
 from imagephotometry import load_vsx
 
@@ -25,6 +26,22 @@ def get_image_jd_filter(fn: Path) -> (Time,str):
         jd.format = "jd"
         filtername = image.header["filter"]
         return jd, filtername
+
+def get_altaz_siderealtime(fn):
+    jd, _ = get_image_jd_filter(fn)
+    with fits.open(fn) as hdul:
+        image = hdul[0]
+        lat = image.header["lat-obs"]
+        lon = image.header["long-obs"]
+        altmsl = image.header["alt-obs"]
+        location = EarthLocation.from_geodetic(lon,lat,altmsl)
+        altaztransformer = AltAz(obstime=jd,location=location)
+        ra = image.header["ra"]
+        dec = image.header["dec"]
+        imagecenter = SkyCoord(ra=ra,dec=dec,unit=(u.hourangle,u.deg))
+        imagecenteraltaz = imagecenter.transform_to(altaztransformer)
+        siderealtime = jd.sidereal_time("mean",location)
+        return imagecenteraltaz, siderealtime
 
 def get_vsp_vsx_tables(fn):
     with fits.open(fn) as hdul:
@@ -272,7 +289,7 @@ def calibrate(tables: [[QTable]]) -> None:
     class ObsData:
         N: int
         target: str
-        jdmean: u.adu
+        jdmean: Time
         Vssr: u.mag**2
         Bssr: u.mag**2
         Voffset: u.mag
@@ -294,8 +311,8 @@ def calibrate(tables: [[QTable]]) -> None:
             newtables.append(obs)
             obsforplots = obs[selectorforplots(obs)]
             obsdata = ObsData(len(obs),obs.meta["target"],jds.mean(),
-                            ((obsforplots["Vcalib"]-obsforplots["Vcat"])**2).mean(),
-                            ((obsforplots["Bcalib"]-obsforplots["Bcat"])**2).mean(),
+                            ((obsforplots["Vcalib"]-obsforplots["Vcat"])**2).sum(),
+                            ((obsforplots["Bcalib"]-obsforplots["Bcat"])**2).sum(),
                             offsets["V"],offsets["B"])
             obsdatas.append(obsdata)
     obssummarytable = QTable([asdict(x) for x in obsdatas])
