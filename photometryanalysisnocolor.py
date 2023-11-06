@@ -160,6 +160,10 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     selector = lambda table: (table["matchdist"] < 10*u.arcsec) & table["isvsp"] \
                                         & (table["rawpeak"] > rawpeakmin) & (table["rawpeak"] < rawpeakmax)
 
+
+
+    #### Observation summaries ####
+
     obssummaries = []
     for filtername in tablesbyfilter:
         for table in tablesbyfilter[filtername]:

@@ -66,35 +66,51 @@ def get_vsp_vsx_tables(fn):
         return vsp_table,vsx_table
 
 def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
+    @dataclass
+    class RowData:
+        auid: str
+        measmag: u.mag
+        catmag: u.mag
+        catmagerr: u.mag
+        matchdist: u.arcsec
+        rawpeak: u.adu
+        isvsp: bool
+        x: u.pixel
+        y: u.pixel
+
     result = vsp.copy()
-    names = ("auid","measmag","catmag","catmagerr","matchdist","rawpeak","isvsp")
-    auids = []
-    measmags = []
-    catmags = []
-    catmagerrs = []
-    matchdists = []
-    rawpeaks = []
-    isvsps = []
+    names = ("auid","measmag","catmag","catmagerr","matchdist","rawpeak","isvsp","x","y")
+    newrows = []
     for row in vsp:
-        auids.append(row["auid"])
-        measmags.append(row["Instrumental Magnitude"]*u.mag)
-        catmags.append(row[filtername])
-        catmagerrs.append(row[filtername+"error"])
-        matchdists.append(row["Match Distance"])
-        rawpeaks.append(row["Raw Peak"]*u.adu)
-        isvsps.append(True)
+        newrow = RowData(
+                        row["auid"],
+                        row["Instrumental Magnitude"]*u.mag,
+                        row[filtername],
+                        row[filtername+"error"],
+                        row["Match Distance"],
+                        row["Raw Peak"]*u.adu,
+                        True,
+                        row["x"]*u.pixel,
+                        row["y"]*u.pixel
+                        )
+        newrows.append(newrow)
     if vsx:
         vsx_good_auids = vsx[np.logical_not(vsx["AUID"].mask)]
         for row in vsx_good_auids:
-            auids.append(row["AUID"])
-            measmags.append(row["Instrumental Magnitude"]*u.mag)
-            catmags.append(float('nan')*u.mag)
-            catmagerrs.append(float('nan')*u.mag)
-            matchdists.append(row["Match Distance"])
-            rawpeaks.append(row["Raw Peak"]*u.adu)
-            isvsps.append(False)
+            newrow = RowData(
+                            row["AUID"],
+                            row["Instrumental Magnitude"]*u.mag,
+                            float('nan')*u.mag,
+                            float('nan')*u.mag,
+                            row["Match Distance"],
+                            row["Raw Peak"]*u.adu,
+                            False,
+                            row["x"]*u.pixel,
+                            row["y"]*u.pixel
+                            )
+            newrows.append(newrow)
     meta = {"std_field":vsp.meta["std_field"],"filter":filtername,"target":vsp.meta["TARGET"]}
-    result = QTable((auids,measmags,catmags,catmagerrs,matchdists,rawpeaks,isvsps),names=names,meta=meta)
+    result = QTable([asdict(x) for x in newrows],names=names,meta=meta)
     return result
 
 def seperate_runs(fns: [Path]) -> [[Path]]:
