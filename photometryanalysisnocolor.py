@@ -16,18 +16,20 @@ from astropy.table import Table, QTable
 from astropy.time import Time, TimeDelta
 
 from imagephotometry import load_vsx
-from photometryanalysis import get_vsp_vsx_tables, combine_vsp_vsx_tables, get_image_jd_filter, get_altaz_siderealtime
+from photometryanalysis import get_vsp_vsx_tables, combine_vsp_vsx_tables, get_image_jd_filter, get_altaz_siderealtime, get_header_fwhmpx
 
 def load_files_by_filter(fns: [Path]) -> {str:[QTable]}:
     tables = {}
     for fn in fns:
         jd, filtername = get_image_jd_filter(fn)
         altaz, sidereal = get_altaz_siderealtime(fn)
+        fwhmpx = get_header_fwhmpx(fn)
         vsp, vsx = get_vsp_vsx_tables(fn)
         table = combine_vsp_vsx_tables(vsp,vsx,filtername)
         table.meta["jd"] = jd
         table.meta["altaz"] = altaz
         table.meta["sidereal"] = sidereal
+        table.meta["fwhmpx"] = fwhmpx
         try:
             tables[filtername].append(table)
         except KeyError:
@@ -148,6 +150,7 @@ class ObsSummaryData:
     alt: float
     ssr: u.mag**2
     zeropoint: u.mag
+    fwhmpx: u.pixel
 
 def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
 
@@ -170,7 +173,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
             zeropoint = instdiff.mean()
             residuals = obs["measmag"] - zeropoint - obs["catmag"]
             ssr = (residuals**2).sum()
-            osd = ObsSummaryData(N,target,filtername,jd,sidereal,alt,ssr,zeropoint)
+            osd = ObsSummaryData(N,target,filtername,jd,sidereal,alt,ssr,zeropoint,obs.meta["fwhmpx"])
             obssummaries.append(osd)
     obssummarytable = QTable([asdict(x) for x in obssummaries])
     obssummarytableV = obssummarytable[obssummarytable["filtername"]=="V"]
@@ -190,6 +193,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     ax2.set_xlabel("JD")
     ax2.set_ylabel(r"Zeropoint [mag]")
     ax2.grid(True)
+    #plt.show()
     fig.savefig(f"CalibNoColorSummary_JD.png")
 
     fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
@@ -224,6 +228,22 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     ax2.grid(True)
     fig.savefig(f"CalibNoColorSummary_Sidereal.png")
 
+    fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
+    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    ax1.scatter(obssummarytableB["fwhmpx"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
+    ax1.scatter(obssummarytableV["fwhmpx"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
+    ax1.set_xlabel("FWHM [pixel]")
+    ax1.set_ylabel(r"Photometry Sum Squared Residuals / (N-1) [mag$^2$]")
+    ax1.set_yscale("log")
+    ax1.grid(True)
+    ax1.legend()
+    ax2.scatter(obssummarytableB["fwhmpx"].value,obssummarytableB["zeropoint"],label="B",c="b",s=markersize)
+    ax2.scatter(obssummarytableV["fwhmpx"].value,obssummarytableV["zeropoint"],label="V",c="g",s=markersize)
+    ax2.set_xlabel("FWHM [pixel]")
+    ax2.set_ylabel(r"Zeropoint [mag]")
+    ax2.grid(True)
+    fig.savefig(f"CalibNoColorSummary_FWHM.png")
+
     fig, ax1 = plt.subplots(figsize=(8,10),constrained_layout=True)
     fig.suptitle("Offset Calibration Only--No Color Calibration")
     ax1.scatter(obssummarytableB["zeropoint"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
@@ -235,6 +255,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     ax1.legend()
     fig.savefig(f"CalibNoColorSummary_ssrVZeropoint.png")
 
+    ## Add vs FWHM, ellipse measure, and sky background
 
 def main():
 

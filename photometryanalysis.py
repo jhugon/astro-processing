@@ -43,6 +43,13 @@ def get_altaz_siderealtime(fn):
         siderealtime = jd.sidereal_time("mean",location)
         return imagecenteraltaz, siderealtime
 
+def get_header_fwhmpx(fn: Path) -> u.Quantity:
+    with fits.open(fn) as hdul:
+        image = hdul[0]
+        fwhmpx = image.header["fwhmpx"]*u.pixel
+        assert(fwhmpx.unit == u.pixel)
+        return fwhmpx
+
 def get_vsp_vsx_tables(fn):
     with fits.open(fn) as hdul:
         vsp_table = None
