@@ -109,7 +109,8 @@ def combine_vsp_vsx_tables(vsp: Table,vsx: Table,filtername: str) -> QTable:
                             row["y"]*u.pixel
                             )
             newrows.append(newrow)
-    meta = {"std_field":vsp.meta["std_field"],"filter":filtername,"target":vsp.meta["TARGET"]}
+    meta = vsp.meta
+    meta["filter"] = filtername
     result = QTable([asdict(x) for x in newrows],names=names,meta=meta)
     return result
 
@@ -181,7 +182,7 @@ def average_vsp_tables(fns,filtername):
     for fn in fns:
         vsp, vsx = get_vsp_vsx_tables(fn)
         table = combine_vsp_vsx_tables(vsp,vsx,filtername)
-        targets.add(table.meta["target"])
+        targets.add(table.meta["TARGET"])
         jds.append(get_image_jd_filter(fn)[0])
         for row in table:
             auid = row["auid"]
@@ -214,7 +215,7 @@ def average_vsp_tables(fns,filtername):
             [isVSP[auid] for auid in auids],
         ],
         names = ("auid","measmag","measmagerr","catmag","catmagerr","matchdist","rawpeak","isvsp"),
-        meta = {"filter":filtername,"jds":jds,"target":targets.pop()}
+        meta = {"filter":filtername,"jds":jds,"TARGET":targets.pop()}
     )
     return result
 
@@ -271,7 +272,7 @@ def combine_filters(tables: [Table]) -> Table:
         newrow = {"auid": auid,"matchdist":-20.*u.arcsec}
         for table in tables:
             filtername = table.meta["filter"]
-            targets.add(table.meta["target"])
+            targets.add(table.meta["TARGET"])
             row = table.loc[auid]
             newrow["matchdist"] = max(newrow["matchdist"],row["matchdist"])
             newrow[filtername+"meas"] = row["measmag"]
@@ -282,7 +283,7 @@ def combine_filters(tables: [Table]) -> Table:
             newrow["isvsp"] = row["isvsp"]
         newrows.append(newrow)
     assert(len(targets)==1)
-    result = QTable(rows=newrows,meta={"jds":newjds,"target":targets.pop()})
+    result = QTable(rows=newrows,meta={"jds":newjds,"TARGET":targets.pop()})
     return result
 
 def load_group_by_runs_filters(fns: [Path]) -> [[QTable]]:
@@ -322,7 +323,7 @@ def calibrate(tables: [[QTable]]) -> None:
     obsdatas = []
     for run in tables:
         for obs in run:
-            obs["target"] = obs.meta["target"]
+            obs["TARGET"] = obs.meta["TARGET"]
             jds = Time(obs.meta["jds"]) # list of Times to Time with list
             obs["jd"] = jds.mean()
             obsforoffset = obs[selectorforoffset(obs)]
@@ -333,7 +334,7 @@ def calibrate(tables: [[QTable]]) -> None:
                 offsets[filtername] = offset
             newtables.append(obs)
             obsforplots = obs[selectorforplots(obs)]
-            obsdata = ObsData(len(obs),obs.meta["target"],jds.mean(),
+            obsdata = ObsData(len(obs),obs.meta["TARGET"],jds.mean(),
                             ((obsforplots["Vcalib"]-obsforplots["Vcat"])**2).sum(),
                             ((obsforplots["Bcalib"]-obsforplots["Bcat"])**2).sum(),
                             offsets["V"],offsets["B"])
