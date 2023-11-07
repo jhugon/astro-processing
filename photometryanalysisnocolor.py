@@ -157,11 +157,54 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     markersize = 4**2 # default is 6**2
     rawpeakmin = 3200*u.adu
     rawpeakmax = 64000*u.adu
+    imageedgewidth = 20*u.pixel
     selector = lambda table: (table["matchdist"] < 10*u.arcsec) & table["isvsp"] \
-                                        & (table["rawpeak"] > rawpeakmin) & (table["rawpeak"] < rawpeakmax)
+                                        & (table["rawpeak"] > rawpeakmin) & (table["rawpeak"] < rawpeakmax) \
+                                        & (table["x"] > imageedgewidth) & (table["x"] < (table.meta["NPIXX"]*u.pixel - imageedgewidth)) \
+                                        & (table["y"] > imageedgewidth) & (table["y"] < (table.meta["NPIXY"]*u.pixel - imageedgewidth)) \
 
+    for filtername in tablesbyfilter:
+        obslist = []
+        for table in tablesbyfilter[filtername]:
+            obs = table[selector(table)]
+            if len(obs) == 0:
+                continue
+            obs["jd"] = obs.meta["jd"]
+            instdiff = obs["measmag"]-obs["catmag"]
+            zeropoint = instdiff.mean()
+            obs["calibmag"] = obs["measmag"] - zeropoint
+            obslist.append(obs)
+        alltable = astropy.table.vstack(obslist,metadata_conflicts="silent")
 
+        print(alltable.colnames)
 
+        calibdiffs = alltable["calibmag"]-alltable["catmag"]
+        fig, (ax1,ax2,ax3,ax4,ax5,ax6) = plt.subplots(6,figsize=(8,10),constrained_layout=True)
+        yaxis_label = f"{filtername} Cal - Cat [mag]"
+        fig.suptitle("Zeropoint Calibration Only--No Color Calibration")
+        ax1.scatter(alltable["x"],calibdiffs,s=markersize)
+        ax1.set_xlabel(f"Image x position [pixel]")
+        ax1.set_ylabel(yaxis_label)
+        ax1.grid(True)
+        ax2.scatter(alltable["y"],calibdiffs,s=markersize)
+        ax2.set_xlabel(f"Image y position [pixel]")
+        ax2.set_ylabel(yaxis_label)
+        ax2.grid(True)
+        ax3.scatter(alltable["catmag"],calibdiffs,s=markersize)
+        ax3.set_xlabel(f"Catalog {filtername} [mag]")
+        ax3.set_ylabel(yaxis_label)
+        ax3.grid(True)
+        ax5.scatter(alltable["matchdist"],calibdiffs,s=markersize)
+        ax5.set_xlabel("Match Distance [arcsec]")
+        ax5.set_ylabel(yaxis_label)
+        ax5.set_xscale("log")
+        ax5.grid(True)
+        ax6.scatter(alltable["rawpeak"],calibdiffs,s=markersize)
+        ax6.set_xlabel("Raw Peak Value [ADU]")
+        ax6.set_ylabel(yaxis_label)
+        ax6.grid(True)
+        fig.savefig(f"CalibNoColor_{filtername}.png")
+        
     #### Observation summaries ####
 
     obssummaries = []
@@ -169,7 +212,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
         for table in tablesbyfilter[filtername]:
             obs = table[selector(table)]
             N = len(obs)
-            target = obs.meta["target"]
+            target = obs.meta["TARGET"]
             jd = obs.meta["jd"]
             sidereal = obs.meta["sidereal"]
             alt = obs.meta["altaz"].alt.value
@@ -184,7 +227,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     obssummarytableB = obssummarytable[obssummarytable["filtername"]=="B"]
 
     fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
-    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    fig.suptitle("Zeropoint Calibration Only--No Color Calibration")
     ax1.scatter(obssummarytableB["jd"].value,obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
     ax1.scatter(obssummarytableV["jd"].value,obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
     ax1.set_xlabel("JD")
@@ -201,7 +244,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     fig.savefig(f"CalibNoColorSummary_JD.png")
 
     fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
-    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    fig.suptitle("Zeropoint Calibration Only--No Color Calibration")
     ax1.scatter(obssummarytableB["alt"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
     ax1.scatter(obssummarytableV["alt"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
     ax1.set_xlabel("Image Center Altitude [deg]")
@@ -211,13 +254,13 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     ax1.legend()
     ax2.scatter(obssummarytableB["alt"],obssummarytableB["zeropoint"],label="B",c="b",s=markersize)
     ax2.scatter(obssummarytableV["alt"],obssummarytableV["zeropoint"],label="V",c="g",s=markersize)
-    ax1.set_xlabel("Image Center Altitude [deg]")
+    ax2.set_xlabel("Image Center Altitude [deg]")
     ax2.set_ylabel(r"Zeropoint [mag]")
     ax2.grid(True)
     fig.savefig(f"CalibNoColorSummary_Alt.png")
 
     fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
-    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    fig.suptitle("Zeropoint Calibration Only--No Color Calibration")
     ax1.scatter(obssummarytableB["sidereal"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
     ax1.scatter(obssummarytableV["sidereal"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
     ax1.set_xlabel("Local Sidereal Time [hourangle]")
@@ -233,7 +276,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     fig.savefig(f"CalibNoColorSummary_Sidereal.png")
 
     fig, (ax1,ax2) = plt.subplots(2,figsize=(8,10),constrained_layout=True)
-    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    fig.suptitle("Zeropoint Calibration Only--No Color Calibration")
     ax1.scatter(obssummarytableB["fwhmpx"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
     ax1.scatter(obssummarytableV["fwhmpx"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
     ax1.set_xlabel("FWHM [pixel]")
@@ -249,7 +292,7 @@ def analyze_vsp_stars(tablesbyfilter: {str:[QTable]}) -> None:
     fig.savefig(f"CalibNoColorSummary_FWHM.png")
 
     fig, ax1 = plt.subplots(figsize=(8,10),constrained_layout=True)
-    fig.suptitle("Offset Calibration Only--No Color Calibration")
+    fig.suptitle("Zeropoint Calibration Only--No Color Calibration")
     ax1.scatter(obssummarytableB["zeropoint"],obssummarytableB["ssr"]/(obssummarytableB["N"]-1),label="B",c="b",s=markersize)
     ax1.scatter(obssummarytableV["zeropoint"],obssummarytableV["ssr"]/(obssummarytableV["N"]-1),label="V",c="g",s=markersize)
     ax1.set_xlabel(r"Zeropoint [mag]")
