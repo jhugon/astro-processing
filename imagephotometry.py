@@ -238,13 +238,19 @@ def analyze(fn,outdir,rawdirs,session):
         
         phottable = QTable([instmag,flux_bkg_sub,flux,flux_bkg,sources["xcentroid"],sources["ycentroid"],skypositions.ra.to_string("deg"),skypositions.dec.to_string("deg"),rawaperstats.max],
                             names=("Instrumental Magnitude","Flux - Background", "Flux", "Background Flux","x","y","ra","dec","Raw Peak"),
-                            meta={"name": "PHOTTABLE","R":aperture_R,"RIN": annulus_Rin, "ROUT": annulus_Rout}
+                            meta={"name": "PHOTTABLE","R":aperture_R,"RIN": annulus_Rin, "ROUT": annulus_Rout, 
+                                    "npixx": image.header["naxis1"], "npixy": image.header["naxis2"]
+                                 }
                         )
 
         vsx_table, vsp_table = combine_photometry_vsx_vsp(image,phottable,session,std_field)
         if vsx_table:
             vsx_table.meta["target"] = target
+            vsx_table.meta["npixx"] = phottable.meta["npixx"]
+            vsx_table.meta["npixy"] = phottable.meta["npixy"]
         vsp_table.meta["target"] = target
+        vsp_table.meta["npixx"] = phottable.meta["npixx"]
+        vsp_table.meta["npixy"] = phottable.meta["npixy"]
 
         # Output file
 
